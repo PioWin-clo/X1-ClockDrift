@@ -5,6 +5,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
 
+const USER_AGENT: &str =
+    "x1-clockdrift/0.1 (+https://github.com/PioWin-clo/x1-clockdrift)";
+
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct VoteAccountInfo {
@@ -32,15 +35,7 @@ pub struct BlockData {
 
 #[derive(Debug)]
 pub struct TxView {
-    pub account_keys: Vec<String>,
-    pub instructions: Vec<IxView>,
-}
-
-#[derive(Debug)]
-pub struct IxView {
-    pub program_id_index: usize,
-    pub accounts: Vec<usize>,
-    pub data_bytes: Vec<u8>,
+    pub instructions: Vec<Value>,
 }
 
 #[derive(Debug)]
@@ -91,6 +86,7 @@ impl RpcClient {
         let min_gap = Duration::from_millis(1000 / rate as u64);
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
+            .user_agent(USER_AGENT)
             .build()
             .context("building reqwest client")?;
         Ok(Self {
@@ -115,7 +111,11 @@ impl RpcClient {
     }
 
     async fn raw_call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
-        let _permit = self.sem.acquire().await.map_err(|e| RpcError::Decode(e.to_string()))?;
+        let _permit = self
+            .sem
+            .acquire()
+            .await
+            .map_err(|e| RpcError::Decode(e.to_string()))?;
         self.rate_gate().await;
 
         let body = json!({
@@ -148,7 +148,8 @@ impl RpcClient {
     #[allow(dead_code)]
     pub async fn get_slot(&self) -> Result<u64, RpcError> {
         let v = self.raw_call("getSlot", json!([])).await?;
-        v.as_u64().ok_or_else(|| RpcError::Decode("getSlot: not u64".into()))
+        v.as_u64()
+            .ok_or_else(|| RpcError::Decode("getSlot: not u64".into()))
     }
 
     pub async fn get_vote_accounts(&self) -> Result<Vec<VoteAccountInfo>, RpcError> {
@@ -160,13 +161,14 @@ impl RpcClient {
         Ok(out)
     }
 
-    /// Returns Ok(None) if the slot returned -32015 (txn version not supported)
-    /// or -32004/-32007 (slot not found / skipped). Other errors propagate.
+    /// Returns Ok(None) for skipped slots and unsupported txn versions; other
+    /// errors propagate. Uses `jsonParsed` encoding so vote instructions arrive
+    /// pre-decoded from the RPC.
     pub async fn get_block_with_votes(&self, slot: u64) -> Result<Option<BlockData>, RpcError> {
         let params = json!([
             slot,
             {
-                "encoding": "json",
+                "encoding": "jsonParsed",
                 "transactionDetails": "full",
                 "rewards": false,
                 "maxSupportedTransactionVersion": 1
@@ -227,49 +229,12 @@ fn parse_block(v: Value) -> Result<BlockData, String> {
     let mut transactions = Vec::new();
     if let Some(txs) = v.get("transactions").and_then(|x| x.as_array()) {
         for t in txs {
-            let msg = match t.pointer("/transaction/message") {
-                Some(m) => m,
+            let ixs_value = t.pointer("/transaction/message/instructions");
+            let instructions = match ixs_value.and_then(|v| v.as_array()) {
+                Some(arr) => arr.clone(),
                 None => continue,
             };
-            let account_keys: Vec<String> = msg
-                .get("accountKeys")
-                .and_then(|x| x.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|s| s.as_str().map(|x| x.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let mut ixs = Vec::new();
-            if let Some(arr) = msg.get("instructions").and_then(|x| x.as_array()) {
-                for ix in arr {
-                    let program_id_index = match ix.get("programIdIndex").and_then(|x| x.as_u64()) {
-                        Some(n) => n as usize,
-                        None => continue,
-                    };
-                    let accounts: Vec<usize> = ix
-                        .get("accounts")
-                        .and_then(|x| x.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|n| n.as_u64().map(|x| x as usize))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let data_str = ix.get("data").and_then(|x| x.as_str()).unwrap_or("");
-                    let data_bytes = bs58::decode(data_str).into_vec().unwrap_or_default();
-                    ixs.push(IxView {
-                        program_id_index,
-                        accounts,
-                        data_bytes,
-                    });
-                }
-            }
-            transactions.push(TxView {
-                account_keys,
-                instructions: ixs,
-            });
+            transactions.push(TxView { instructions });
         }
     }
 
@@ -293,9 +258,13 @@ mod tests {
                 {
                     "transaction": {
                         "message": {
-                            "accountKeys": ["AAA", "BBB", "Vote111111111111111111111111111111111111111"],
+                            "accountKeys": ["AAA", "BBB"],
                             "instructions": [
-                                {"programIdIndex": 2, "accounts": [0, 1], "data": "3DTZbgwnSZQjL"}
+                                {
+                                    "parsed": {"type": "towersync", "info": {}},
+                                    "program": "vote",
+                                    "programId": "Vote111111111111111111111111111111111111111"
+                                }
                             ]
                         }
                     }
@@ -304,8 +273,28 @@ mod tests {
         });
         let bd = parse_block(v).unwrap();
         assert_eq!(bd.parent_slot, 100);
+        assert_eq!(bd.block_time, Some(1700000000));
         assert_eq!(bd.transactions.len(), 1);
-        assert_eq!(bd.transactions[0].account_keys.len(), 3);
-        assert_eq!(bd.transactions[0].instructions[0].program_id_index, 2);
+        assert_eq!(bd.transactions[0].instructions.len(), 1);
+        assert_eq!(
+            bd.transactions[0].instructions[0]["program"]
+                .as_str()
+                .unwrap(),
+            "vote"
+        );
+    }
+
+    #[test]
+    fn parse_block_skips_txns_without_instructions() {
+        let v = json!({
+            "parentSlot": 1,
+            "transactions": [
+                {"transaction": {}},
+                {"transaction": {"message": {"instructions": []}}}
+            ]
+        });
+        let bd = parse_block(v).unwrap();
+        assert_eq!(bd.transactions.len(), 1);
+        assert!(bd.transactions[0].instructions.is_empty());
     }
 }

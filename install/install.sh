@@ -75,7 +75,9 @@ fi
 echo "==> Writing config.toml"
 cat > "$INSTALL_DIR/config.toml" <<TOML
 log_path = "/home/x1pio/validator.log"
-rpc_url = "http://localhost:8899"
+# Local validator does not expose --full-rpc-api, so we use the public X1 RPC.
+# Sampling cadence is conservative (one block / ~500 slots, ~600 calls/day).
+rpc_url = "https://rpc.mainnet.x1.xyz"
 db_path = "$INSTALL_DIR/data.db"
 api_listen = "127.0.0.1:8088"
 git_repo_path = "$REPO_DIR"

@@ -7,9 +7,18 @@ use tokio::sync::Semaphore;
 
 const MAX_INFLIGHT: usize = 16;
 
+/// Sample one block per this many slots. Public RPC is the only viable
+/// source since the local validator does not expose `--full-rpc-api`,
+/// so we keep our load light: ~600 getBlock calls/day at 500 slots.
+const BLOCK_SAMPLE_INTERVAL_SLOTS: u64 = 500;
+
 pub async fn run(pool: Pool, rpc: Arc<RpcClient>, mut rx: Receiver<(u64, i64)>) {
     let limiter = Arc::new(Semaphore::new(MAX_INFLIGHT));
-    tracing::info!("vote_collector starting");
+    let mut last_sampled_slot: u64 = 0;
+    tracing::info!(
+        sample_interval_slots = BLOCK_SAMPLE_INTERVAL_SLOTS,
+        "vote_collector starting"
+    );
 
     while let Some((slot, ts_us)) = rx.recv().await {
         if let Err(e) = db::record_slot_obs(&pool, slot, ts_us).await {
@@ -17,6 +26,11 @@ pub async fn run(pool: Pool, rpc: Arc<RpcClient>, mut rx: Receiver<(u64, i64)>) 
             let _ = db::record_error(&pool, "vote_collector", &format!("slot_obs: {e}")).await;
             continue;
         }
+
+        if slot < last_sampled_slot.saturating_add(BLOCK_SAMPLE_INTERVAL_SLOTS) {
+            continue;
+        }
+        last_sampled_slot = slot;
 
         let permit = match limiter.clone().acquire_owned().await {
             Ok(p) => p,
@@ -47,12 +61,12 @@ async fn fetch_and_record(slot: u64, rpc: &RpcClient, pool: &Pool) -> Result<(),
 
     let mut all = Vec::new();
     for tx in &block.transactions {
-        for v in vote_parser::extract_votes_from_tx(tx) {
-            if let Some(ts) = v.ts_chain {
+        for ix in &tx.instructions {
+            if let Some(parsed) = vote_parser::parse_instruction(ix) {
                 all.push(VoteRecord {
-                    validator: v.validator,
-                    slot_voted: v.slot_voted,
-                    ts_chain: ts,
+                    validator: parsed.vote_account,
+                    slot_voted: parsed.last_voted_slot,
+                    ts_chain: parsed.timestamp,
                 });
             }
         }
