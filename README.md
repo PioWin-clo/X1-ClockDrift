@@ -2,7 +2,7 @@
 
 Live measurement of `Clock::unix_timestamp` drift on the X1 blockchain.
 
-**Live dashboard**: https://piowin-clo.github.io/x1-clockdrift/
+**Live dashboard**: https://piowin-clo.github.io/X1-ClockDrift/
 
 [Polski README](README.pl.md) · [Methodology](docs/methodology.md)
 
@@ -95,5 +95,5 @@ it on GitHub with write access, clones the `data` branch, writes
 
 ## Status
 
-[![CI](https://github.com/PioWin-clo/x1-clockdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/PioWin-clo/x1-clockdrift/actions/workflows/ci.yml)
+[![CI](https://github.com/PioWin-clo/X1-ClockDrift/actions/workflows/ci.yml/badge.svg)](https://github.com/PioWin-clo/X1-ClockDrift/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)

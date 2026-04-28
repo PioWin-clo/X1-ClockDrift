@@ -21,5 +21,5 @@ echo "===================================================="
 echo "Public key (add to GitHub repo settings → Deploy keys):"
 cat "${KEY_PATH}.pub"
 echo
-echo "URL: https://github.com/PioWin-clo/x1-clockdrift/settings/keys/new"
+echo "URL: https://github.com/PioWin-clo/X1-ClockDrift/settings/keys/new"
 echo "Tick 'Allow write access'."

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
 
 const USER_AGENT: &str =
-    "x1-clockdrift/0.1 (+https://github.com/PioWin-clo/x1-clockdrift)";
+    "x1-clockdrift/0.1 (+https://github.com/PioWin-clo/X1-ClockDrift)";
 
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]

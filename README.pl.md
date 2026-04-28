@@ -2,7 +2,7 @@
 
 Pomiar driftu `Clock::unix_timestamp` na blockchainie X1, na żywo.
 
-**Dashboard na żywo**: https://piowin-clo.github.io/x1-clockdrift/
+**Dashboard na żywo**: https://piowin-clo.github.io/X1-ClockDrift/
 
 [English README](README.md) · [Metodologia](docs/methodology.md)
 

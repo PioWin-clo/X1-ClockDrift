@@ -6,9 +6,9 @@ REPO_DIR="$INSTALL_DIR/repo"
 BIN_DIR="$INSTALL_DIR/bin"
 FRONTEND_DIR="$INSTALL_DIR/frontend"
 KEY_PATH="/home/x1pio/.ssh/x1cd_deploy_key"
-GH_REPO="git@github.com:PioWin-clo/x1-clockdrift.git"
+GH_REPO="git@github.com:PioWin-clo/X1-ClockDrift.git"
 BIN_NAME="x1cd"
-BIN_URL="https://github.com/PioWin-clo/x1-clockdrift/releases/latest/download/x1cd-linux-x86_64"
+BIN_URL="https://github.com/PioWin-clo/X1-ClockDrift/releases/latest/download/x1cd-linux-x86_64"
 SERVICE_FILE_LOCAL="$(dirname "$0")/strontium-meter.service"
 SERVICE_FILE_DST="/etc/systemd/system/x1cd.service"
 
@@ -43,7 +43,7 @@ if [ ! -f "$KEY_PATH" ]; then
   echo "DEPLOY KEY generated. Public key:"
   cat "${KEY_PATH}.pub"
   echo "===================================================="
-  echo "Add it at: https://github.com/PioWin-clo/x1-clockdrift/settings/keys/new"
+  echo "Add it at: https://github.com/PioWin-clo/X1-ClockDrift/settings/keys/new"
   echo "with 'Allow write access' enabled."
   echo
   read -r -p "Press Enter once the deploy key is registered… " _
