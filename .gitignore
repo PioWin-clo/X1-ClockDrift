@@ -1,0 +1,16 @@
+/target
+/repo
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+.env
+.DS_Store
+*.swp
+*.swo
+node_modules/
+.idea/
+.vscode/
+.claude/
+X1_ClockDrift_PROMPT.md

@@ -1,0 +1,38 @@
+[Unit]
+Description=X1 ClockDrift measurement daemon
+Documentation=https://github.com/PioWin-clo/x1-clockdrift
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=x1pio
+Group=x1pio
+ExecStart=/home/x1pio/strontium-meter/bin/x1cd run --config /home/x1pio/strontium-meter/config.toml
+WorkingDirectory=/home/x1pio/strontium-meter
+Restart=on-failure
+RestartSec=30
+WatchdogSec=120
+TimeoutStopSec=30
+
+# Resource limits — validator gets absolute priority
+CPUQuota=20%
+MemoryMax=512M
+Nice=19
+IOSchedulingClass=idle
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/x1pio/strontium-meter /home/x1pio/.ssh
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

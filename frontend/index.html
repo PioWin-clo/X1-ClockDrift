@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X1 ClockDrift</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">x1</span>
+    <span class="brand-name">ClockDrift</span>
+  </div>
+  <div class="tagline">Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.</div>
+  <div class="updated" id="updated">Loading…</div>
+</header>
+
+<main class="container">
+
+  <section class="hero">
+    <div class="hero-label">Network drift right now</div>
+    <div class="hero-value" id="hero-value">—</div>
+    <div class="hero-sub" id="hero-sub">—</div>
+  </section>
+
+  <section class="cards">
+    <div class="card">
+      <div class="card-label">Validators observed (24h)</div>
+      <div class="card-value" id="card-validators">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Samples (24h)</div>
+      <div class="card-value" id="card-samples">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Drift &gt; 1s</div>
+      <div class="card-value" id="card-drift1s">—</div>
+      <div class="card-sub" id="card-drift1s-pct">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Stake-weighted drift</div>
+      <div class="card-value" id="card-stake-drift">—</div>
+    </div>
+  </section>
+
+  <section class="chart-block">
+    <div class="chart-title">Network drift over time (last 7 days, 5-minute buckets)</div>
+    <div class="chart-frame">
+      <canvas id="chart-history"></canvas>
+    </div>
+  </section>
+
+  <section class="chart-block">
+    <div class="chart-title">Validator drift distribution (mean drift, top 500)</div>
+    <div class="chart-frame">
+      <canvas id="chart-histogram"></canvas>
+    </div>
+  </section>
+
+  <section class="ranking-block">
+    <div class="ranking-head">
+      <div class="ranking-title">Validator ranking</div>
+      <input class="search" id="search" type="search" placeholder="search by pubkey…" autocomplete="off">
+    </div>
+    <div class="table-wrap">
+      <table class="ranking">
+        <thead>
+          <tr>
+            <th data-sort="rank">#</th>
+            <th data-sort="pubkey">pubkey</th>
+            <th data-sort="mean_drift_ms" class="num">mean (ms)</th>
+            <th data-sort="median_drift_ms" class="num">median (ms)</th>
+            <th data-sort="stddev_drift_ms" class="num">stddev (ms)</th>
+            <th data-sort="p10_drift_ms" class="num">p10 (ms)</th>
+            <th data-sort="p90_drift_ms" class="num">p90 (ms)</th>
+            <th data-sort="n_samples" class="num">n</th>
+            <th data-sort="stake_xnt" class="num">stake (XNT)</th>
+            <th data-sort="weighted_impact_ms_xnt" class="num">impact</th>
+          </tr>
+        </thead>
+        <tbody id="ranking-body"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button id="prev">prev</button>
+      <span id="page-info">page 1</span>
+      <button id="next">next</button>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div>
+      <a href="https://github.com/PioWin-clo/x1-clockdrift" target="_blank" rel="noreferrer noopener">github</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/PioWin-clo/x1-clockdrift/blob/main/docs/methodology.md" target="_blank" rel="noreferrer noopener">methodology</a>
+    </div>
+    <div id="meta-line">—</div>
+  </footer>
+
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"
+        integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="app.js"></script>
+</body>
+</html>
