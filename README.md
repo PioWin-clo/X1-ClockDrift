@@ -24,9 +24,15 @@ for every (validator, slot) pair we can match.
 
 - The daemon runs on a single X1 validator (the host).
 - It tails `validator.log` to obtain microsecond-precision local clock
-  readings of `bank frozen` events.
-- It queries the local RPC (`http://localhost:8899`) at no more than 5
-  requests/second for vote instructions in newly-frozen blocks.
+  readings of `bank frozen` events for **every** slot.
+- It queries the **public X1 RPC** (`https://rpc.mainnet.x1.xyz`) for
+  vote instructions, sampling **one block per ~500 slots (~3 minutes)**
+  — roughly **600 `getBlock` calls/day**, plus one `getVoteAccounts`
+  per hour for stake snapshots. We use the public RPC because the
+  local validator is started without `--full-rpc-api` and therefore
+  does not expose `getBlock`; we cannot modify validator config.
+  Vote instructions are returned pre-decoded via `encoding=jsonParsed`,
+  so no byte-level parsing is needed in the daemon.
 - A SQLite database accumulates raw observations and refreshed stake
   snapshots.
 - Every 5 minutes the daemon recomputes per-validator and per-network

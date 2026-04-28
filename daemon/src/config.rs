@@ -75,7 +75,7 @@ mod tests {
     fn parses_full_config() {
         let toml = r#"
 log_path = "/var/log/validator.log"
-rpc_url = "http://localhost:8899"
+rpc_url = "https://rpc.mainnet.x1.xyz"
 db_path = "/data/data.db"
 api_listen = "127.0.0.1:8088"
 git_repo_path = "/data/repo"

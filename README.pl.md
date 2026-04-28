@@ -25,9 +25,16 @@ którą udało się dopasować.
 
 - Daemon działa na jednym walidatorze X1 (host).
 - Czyta `validator.log` żeby pobrać czas lokalny zdarzeń `bank frozen`
-  z rozdzielczością mikrosekundową.
-- Odpytuje lokalne RPC (`http://localhost:8899`) z limitem 5 zapytań/s
-  o vote instructions w nowo zamrożonych blokach.
+  dla **każdego** slotu, z rozdzielczością mikrosekundową.
+- Odpytuje **publiczne RPC X1** (`https://rpc.mainnet.x1.xyz`) o vote
+  instructions, samplując **jeden blok na ~500 slotów (~3 min)** —
+  to około **600 wywołań `getBlock` na dobę**, plus jedno
+  `getVoteAccounts` na godzinę dla snapshotów stake. Używamy publicznego
+  RPC ponieważ lokalny walidator jest uruchomiony bez `--full-rpc-api`
+  i nie eksponuje `getBlock`; nie mamy możliwości zmiany jego konfiguracji.
+  Vote instructions są dekodowane po stronie RPC przez
+  `encoding=jsonParsed`, więc daemon nie wykonuje żadnego parsowania
+  na poziomie bajtów.
 - Baza SQLite akumuluje surowe obserwacje + odświeżane snapshoty stake.
 - Co 5 minut daemon przelicza agregaty per-validator i per-network,
   eksportuje JSON-y do klona tego repozytorium i pushuje na gałąź `data`.

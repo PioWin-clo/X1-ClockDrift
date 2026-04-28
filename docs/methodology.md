@@ -59,12 +59,22 @@ isolates persistent clock skew.
 - **Network propagation.** Our host hears about a slot after the
   producer has already moved on. This adds ≤ 100 ms typical noise to
   the local-clock side.
-- **Vote variants.** Different versions of the vote instruction encode
-  the timestamp in slightly different layouts; the parser handles the
-  current set (Vote, VoteSwitch, UpdateVoteState[Switch],
-  CompactUpdateVoteState[Switch], TowerSync[Switch]). Unknown variants
-  are logged and skipped, which under-counts samples for affected
-  validators rather than producing false readings.
+- **Vote variants.** Vote instructions evolved on-chain (Vote,
+  VoteSwitch, UpdateVoteState[Switch], CompactUpdateVoteState[Switch],
+  TowerSync[Switch] — at the time of writing X1 mainnet v2.2.20
+  produces TowerSync exclusively). We do not parse the wire bytes
+  ourselves; instead we ask the RPC for `encoding=jsonParsed`, which
+  decodes each instruction server-side into a stable JSON shape with
+  a `type` discriminator and a typed payload (`towerSync.lockouts`,
+  `vote.slots`, etc.). Our parser tries each known payload shape in
+  order, takes the maximum slot from the lockouts and the embedded
+  `timestamp`, and skips any vote whose payload it does not recognise
+  or that has no timestamp. This makes the daemon **forward-compatible
+  with future Tachyon vote-instruction changes**: as long as the RPC
+  knows how to decode the new variant, we keep working without a
+  release. Variants the RPC cannot decode are dropped (debug-logged),
+  which under-counts samples for affected validators rather than
+  producing false readings.
 
 ## EN: How to interpret the dashboard
 
@@ -138,12 +148,22 @@ trwałe odchylenie zegara.
 - **Propagacja sieciowa.** Nasz host dowiaduje się o slocie po
   producencie. To dodaje ~100 ms typowego szumu po stronie zegara
   lokalnego.
-- **Warianty vote.** Różne wersje instrukcji vote kodują timestamp
-  w trochę innych layoutach; parser obsługuje aktualny zestaw (Vote,
+- **Warianty vote.** Instrukcje vote ewoluowały on-chain (Vote,
   VoteSwitch, UpdateVoteState[Switch], CompactUpdateVoteState[Switch],
-  TowerSync[Switch]). Nieznane warianty są logowane i pomijane —
-  zaniża to liczność próbki dla dotkniętych walidatorów, ale nie
-  wprowadza fałszywych odczytów.
+  TowerSync[Switch] — w momencie pisania, X1 mainnet v2.2.20 produkuje
+  wyłącznie TowerSync). Nie parsujemy bajtów wire'owych sami; zamiast
+  tego prosimy RPC o `encoding=jsonParsed`, co dekoduje każdą instrukcję
+  po stronie serwera do stabilnego kształtu JSON z dyskryminatorem
+  `type` i typowanym payloadem (`towerSync.lockouts`, `vote.slots`,
+  itd.). Parser próbuje kolejnych znanych kształtów payloadu, bierze
+  maksymalny slot z lockouts oraz wbudowany `timestamp`, i pomija
+  każdy vote którego payloadu nie rozpoznaje lub w którym brak
+  timestampa. Daemon jest dzięki temu **forward-compatible z przyszłymi
+  zmianami vote instructions w Tachyonie**: dopóki RPC potrafi
+  zdekodować nowy wariant, działamy bez release'u. Warianty których
+  RPC nie potrafi rozpoznać są pomijane (debug-log), co zaniża liczność
+  próbki dla dotkniętych walidatorów, ale nie wprowadza fałszywych
+  odczytów.
 
 ## PL: Jak interpretować dashboard
 
