@@ -15,9 +15,12 @@
   <div class="tagline" data-i18n-html="tagline">Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.</div>
   <div class="header-controls">
     <label class="filter-toggle">
-      <input type="checkbox" id="hide-farms" checked>
-      <span data-i18n="hide_farms">Hide farms</span>
-      <span class="toggle-info" id="farm-info">(0)</span>
+      <input type="checkbox" id="hide-foundation">
+      <span data-i18n="hide_foundation">Hide X1 Labs</span>
+    </label>
+    <label class="filter-toggle">
+      <input type="checkbox" id="capybara-only">
+      <span data-i18n="capybara_qualifying_only">Capybara qualifying only (≥1000 XNT)</span>
     </label>
     <div class="lang-toggle" role="group" aria-label="Language">
       <button id="btn-lang-en" class="lang-btn" type="button">🇬🇧 EN</button>
@@ -31,6 +34,56 @@
 
 <main class="container">
 
+  <!-- ===== HERO #1: X1 network time right now ===== -->
+  <section class="hero1-section">
+    <div class="section-title" data-i18n="hero1_title">X1 network time right now</div>
+    <div class="hero1-times">
+      <div class="hero1-time">
+        <div class="hero1-time-label" data-i18n="hero1_chain_time">X1 chain consensus</div>
+        <div class="hero1-time-value mono" id="hero1-chain-time">—</div>
+      </div>
+      <div class="hero1-time">
+        <div class="hero1-time-label" data-i18n="hero1_real_utc">Real UTC</div>
+        <div class="hero1-time-value mono" id="hero1-real-utc">—</div>
+      </div>
+    </div>
+    <div class="hero1-drift" id="hero1-drift">—</div>
+    <div class="hero1-trend mono" id="hero1-trend">—</div>
+  </section>
+
+  <!-- ===== HERO #2: validator clock health ===== -->
+  <section class="hero2-section">
+    <div class="section-title" data-i18n="hero2_title">Validator clock health</div>
+    <div class="health-cards">
+      <div class="health-card severity-critical">
+        <div class="health-icon">🚨</div>
+        <div class="health-label" data-i18n="health_critical">Critical</div>
+        <div class="health-value mono" id="n-critical">—</div>
+        <div class="health-sub" data-i18n="health_critical_sub">&gt;5s</div>
+      </div>
+      <div class="health-card severity-high">
+        <div class="health-icon">⚠️</div>
+        <div class="health-label" data-i18n="health_high">High</div>
+        <div class="health-value mono" id="n-high">—</div>
+        <div class="health-sub" data-i18n="health_high_sub">1-5s</div>
+      </div>
+      <div class="health-card severity-healthy">
+        <div class="health-icon">✅</div>
+        <div class="health-label" data-i18n="health_healthy">Healthy</div>
+        <div class="health-value mono" id="n-healthy">—</div>
+        <div class="health-sub" data-i18n="health_healthy_sub">&lt;1s</div>
+      </div>
+      <div class="health-card severity-foundation">
+        <div class="health-icon">🏛️</div>
+        <div class="health-label" data-i18n="health_foundation">X1 Labs</div>
+        <div class="health-value mono" id="n-foundation">—</div>
+        <div class="health-sub" data-i18n="health_foundation_sub">separate</div>
+      </div>
+    </div>
+    <div class="capybara-note" id="capybara-note">—</div>
+  </section>
+
+  <!-- ===== My clock vs world (kept) ===== -->
   <section class="clock-section">
     <div class="section-title" data-i18n="clock_section_title">My clock vs world</div>
     <div class="clock-help" data-i18n="clock_help_text">…</div>
@@ -62,52 +115,7 @@
     </div>
   </section>
 
-  <section class="hero">
-    <div class="hero-label" data-i18n="hero_label">Network drift right now</div>
-    <div class="hero-value" id="hero-value">—</div>
-    <div class="hero-sub" id="hero-sub">—</div>
-  </section>
-
-  <section class="cards">
-    <div class="card">
-      <div class="card-label" data-i18n="card_validators">Validators observed (24h)</div>
-      <div class="card-value" id="card-validators">—</div>
-    </div>
-    <div class="card">
-      <div class="card-label" data-i18n="card_samples">Samples (24h)</div>
-      <div class="card-value" id="card-samples">—</div>
-    </div>
-    <div class="card">
-      <div class="card-label" data-i18n="card_drift1s">Drift &gt; 1s</div>
-      <div class="card-value" id="card-drift1s">—</div>
-      <div class="card-sub" id="card-drift1s-pct">—</div>
-    </div>
-    <div class="card">
-      <div class="card-label" data-i18n="card_stake_drift">Stake-weighted drift</div>
-      <div class="card-value" id="card-stake-drift">—</div>
-    </div>
-  </section>
-
-  <section class="clusters-section">
-    <div class="section-title" data-i18n="clusters_section_title">Operator clusters (identical drift signature)</div>
-    <div class="section-help" data-i18n="clusters_help">Validators sharing rounded (mean, stddev, p10) drift values with at least 3 members are flagged as multi-node operators.</div>
-    <div class="clusters-row">
-      <div class="cluster-stat">
-        <span class="cluster-label" data-i18n="clusters_detected">Detected clusters</span>
-        <span class="cluster-value" id="n-clusters">—</span>
-      </div>
-      <div class="cluster-stat">
-        <span class="cluster-label" data-i18n="cluster_validators">Validators in clusters</span>
-        <span class="cluster-value" id="n-clustered">—</span>
-        <span class="cluster-pct" id="n-clustered-pct"></span>
-      </div>
-      <div class="cluster-stat">
-        <span class="cluster-label" data-i18n="largest_cluster">Largest cluster</span>
-        <span class="cluster-value" id="largest-cluster">—</span>
-      </div>
-    </div>
-  </section>
-
+  <!-- ===== Network drift over time (kept, dual y-axis) ===== -->
   <section class="chart-block">
     <div class="chart-title" data-i18n="chart_history_title">Network drift over time (last 7 days, 5-minute buckets)</div>
     <div class="chart-frame">
@@ -115,74 +123,36 @@
     </div>
   </section>
 
-  <section class="chart-block">
-    <div class="chart-title" data-i18n="chart_histogram_title">Validator drift distribution (mean drift, top 500)</div>
-    <div class="chart-frame">
-      <canvas id="chart-histogram"></canvas>
-    </div>
-  </section>
-
-  <section class="scatter-section">
-    <div class="section-title" data-i18n="scatter_title">Stake vs drift correlation</div>
-    <div class="section-help" data-i18n="scatter_help">Each point is a validator. X-axis = stake (log scale). Y-axis = mean drift (ms). Cluster members share colour. Click a point for details.</div>
-    <div class="chart-frame">
-      <canvas id="chart-scatter"></canvas>
-    </div>
-    <div class="scatter-stats">
-      <span data-i18n="scatter_correlation">Correlation</span>:
-      <span id="scatter-r" class="mono">—</span>
-      &nbsp;·&nbsp;
-      <span data-i18n="scatter_slope">Slope</span>:
-      <span id="scatter-slope" class="mono">—</span>
-    </div>
-  </section>
-
-  <section class="best-synced-section">
-    <div class="best-synced-header">
-      <div class="section-title" data-i18n="best_synced_title">Best synchronized validators (top 10)</div>
-      <div class="section-help" data-i18n="best_synced_help">Validators with the smallest absolute drift from network consensus. Minimum 5 samples required.</div>
+  <!-- ===== TOP WORST VALIDATORS ===== -->
+  <section class="worst-block">
+    <div class="ranking-head">
+      <div>
+        <div class="ranking-title" data-i18n="worst_table_title">Top worst validators</div>
+        <div class="section-help" data-i18n="worst_table_help">Sorted by absolute drift (worst first). Foundation nodes flagged but appear in their natural position.</div>
+      </div>
+      <div class="ranking-controls">
+        <select id="severity-filter" class="severity-filter">
+          <option value="all" data-i18n="filter_all">All</option>
+          <option value="critical" data-i18n="filter_critical">Critical only</option>
+          <option value="high" data-i18n="filter_high">High and worse</option>
+        </select>
+        <input class="search" id="search" type="search" data-i18n-attr-placeholder="ranking_search_placeholder" autocomplete="off">
+      </div>
     </div>
     <div class="table-wrap">
-      <table class="best-synced-table">
+      <table class="worst-table">
         <thead>
           <tr>
             <th data-i18n="col_rank">#</th>
-            <th data-i18n="col_pubkey">pubkey</th>
-            <th class="num" data-i18n="col_mean">mean (ms)</th>
-            <th class="num" data-i18n="col_stddev">stddev (ms)</th>
-            <th class="num" data-i18n="col_n">n</th>
-            <th class="num" data-i18n="col_stake">stake (XNT)</th>
-            <th data-i18n="col_cluster">cluster</th>
-          </tr>
-        </thead>
-        <tbody id="best-synced-body"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="ranking-block">
-    <div class="ranking-head">
-      <div class="ranking-title" data-i18n="ranking_title">Validator ranking (sorted by impact: drift × stake)</div>
-      <input class="search" id="search" type="search" data-i18n-attr-placeholder="ranking_search_placeholder" autocomplete="off">
-    </div>
-    <div class="table-wrap">
-      <table class="ranking">
-        <thead>
-          <tr>
-            <th data-sort="rank" data-i18n="col_rank">#</th>
+            <th data-sort="severity" data-i18n="col_severity">tag</th>
             <th data-sort="pubkey" data-i18n="col_pubkey">pubkey</th>
-            <th data-sort="mean_drift_ms" class="num" data-i18n="col_mean">mean (ms)</th>
-            <th data-sort="median_drift_ms" class="num" data-i18n="col_median">median (ms)</th>
-            <th data-sort="stddev_drift_ms" class="num" data-i18n="col_stddev">stddev (ms)</th>
-            <th data-sort="p10_drift_ms" class="num" data-i18n="col_p10">p10 (ms)</th>
-            <th data-sort="p90_drift_ms" class="num" data-i18n="col_p90">p90 (ms)</th>
+            <th data-sort="mean_drift_ms_abs" class="num" data-i18n="col_drift">drift (ms)</th>
+            <th data-sort="stddev_drift_ms" class="num" data-i18n="col_jitter">jitter (ms)</th>
             <th data-sort="n_samples" class="num" data-i18n="col_n">n</th>
             <th data-sort="stake_xnt" class="num" data-i18n="col_stake">stake (XNT)</th>
-            <th data-sort="weighted_impact_ms_xnt" class="num" data-i18n="col_impact">impact</th>
-            <th data-sort="cluster_size" data-i18n="col_cluster">cluster</th>
           </tr>
         </thead>
-        <tbody id="ranking-body"></tbody>
+        <tbody id="worst-body"></tbody>
       </table>
     </div>
     <div class="pagination">
@@ -192,6 +162,104 @@
     </div>
   </section>
 
+  <!-- ===== TOP 10 BEST SYNCED ===== -->
+  <section class="best-synced-section">
+    <div class="best-synced-header">
+      <div class="section-title" data-i18n="best_synced_title">Best synchronized validators (top 10)</div>
+      <div class="section-help" data-i18n="best_synced_help_v04">Validators with the smallest absolute drift. Min 1000 XNT stake (Capybara threshold), min 100 samples, foundation excluded.</div>
+    </div>
+    <div class="table-wrap">
+      <table class="best-synced-table">
+        <thead>
+          <tr>
+            <th data-i18n="col_rank">#</th>
+            <th data-i18n="col_pubkey">pubkey</th>
+            <th class="num" data-i18n="col_drift">drift (ms)</th>
+            <th class="num" data-i18n="col_jitter">jitter (ms)</th>
+            <th class="num" data-i18n="col_n">n</th>
+            <th class="num" data-i18n="col_stake">stake (XNT)</th>
+          </tr>
+        </thead>
+        <tbody id="best-synced-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== X1 LABS FOUNDATION showcase ===== -->
+  <section class="foundation-section">
+    <div class="section-title" data-i18n="foundation_table_title">🏛️ X1 Labs Foundation</div>
+    <div class="section-help" data-i18n="foundation_table_help">Official X1 Labs infrastructure. Shown separately because their drift is operational baseline, not validator misconfiguration.</div>
+    <div class="table-wrap">
+      <table class="foundation-table">
+        <thead>
+          <tr>
+            <th data-i18n="col_rank">#</th>
+            <th data-i18n="col_label">label</th>
+            <th data-i18n="col_pubkey">pubkey</th>
+            <th class="num" data-i18n="col_drift">drift (ms)</th>
+            <th class="num" data-i18n="col_jitter">jitter (ms)</th>
+            <th class="num" data-i18n="col_n">n</th>
+            <th class="num" data-i18n="col_stake">stake (XNT)</th>
+          </tr>
+        </thead>
+        <tbody id="foundation-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== DEEPER ANALYTICS (collapsible) ===== -->
+  <section class="analytics-section">
+    <details id="deeper-analytics">
+      <summary>
+        <span class="section-title" data-i18n="deeper_analytics">Deeper analytics</span>
+        <span class="analytics-hint" data-i18n="analytics_hint">distribution, correlation, signature groups</span>
+      </summary>
+
+      <div class="chart-block">
+        <div class="chart-title" data-i18n="chart_histogram_title">Validator drift distribution (mean drift, top 500)</div>
+        <div class="chart-frame">
+          <canvas id="chart-histogram"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-block">
+        <div class="chart-title" data-i18n="scatter_title">Stake vs drift correlation</div>
+        <div class="section-help" data-i18n="scatter_help">Each point is a validator. X-axis = stake (log scale). Y-axis = mean drift (ms). Cluster members share colour. Click a point for details.</div>
+        <div class="chart-frame">
+          <canvas id="chart-scatter"></canvas>
+        </div>
+        <div class="scatter-stats">
+          <span data-i18n="scatter_correlation">Correlation</span>:
+          <span id="scatter-r" class="mono">—</span>
+          &nbsp;·&nbsp;
+          <span data-i18n="scatter_slope">Slope</span>:
+          <span id="scatter-slope" class="mono">—</span>
+        </div>
+      </div>
+
+      <div class="clusters-section">
+        <div class="section-title" data-i18n="signature_groups_title">Drift signature groups</div>
+        <div class="section-help" data-i18n="signature_groups_help">Validators sharing identical drift values. May indicate shared infrastructure or coincidental NTP setup. Not necessarily 'farms'.</div>
+        <div class="clusters-row">
+          <div class="cluster-stat">
+            <span class="cluster-label" data-i18n="clusters_detected">Detected groups</span>
+            <span class="cluster-value" id="n-clusters">—</span>
+          </div>
+          <div class="cluster-stat">
+            <span class="cluster-label" data-i18n="cluster_validators">Validators in groups</span>
+            <span class="cluster-value" id="n-clustered">—</span>
+            <span class="cluster-pct" id="n-clustered-pct"></span>
+          </div>
+          <div class="cluster-stat">
+            <span class="cluster-label" data-i18n="largest_cluster">Largest group</span>
+            <span class="cluster-value" id="largest-cluster">—</span>
+          </div>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ===== NTP sources (kept) ===== -->
   <section class="sources-section">
     <div class="section-title" data-i18n="sources_section_title">NTP sources (chrony calibration)</div>
     <div class="table-wrap">

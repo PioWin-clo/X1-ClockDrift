@@ -7,8 +7,14 @@ use std::path::Path;
 
 const VALIDATORS_TOP_N: usize = 500;
 const BEST_SYNCED_TOP_N: i64 = 10;
-const BEST_SYNCED_MIN_SAMPLES: i64 = 5;
+/// v0.4.0: bumped from 5 to 100 — sub-100-sample validators are too noisy
+/// for "best" claims. Foundation excluded inside the SQL.
+const BEST_SYNCED_MIN_SAMPLES: i64 = 100;
 const LAMPORTS_PER_XNT: f64 = 1_000_000_000.0;
+/// 1000 XNT in lamports — the Capybara delegation threshold. Validators
+/// below this won't qualify for delegation rewards and are filtered out
+/// of the "best synced" ranking.
+const CAPYBARA_THRESHOLD_LAMPORTS: i64 = 1_000 * 1_000_000_000;
 const HISTORY_BACKFILL_SECS: i64 = 7 * 86400;
 
 pub async fn run(pool: Pool, config: Config) {
@@ -75,6 +81,24 @@ async fn cycle(pool: &Pool, config: &Config) -> Result<()> {
 #[derive(Serialize)]
 struct SummaryJson {
     generated_at_utc: String,
+
+    // v0.4.0 Hero #1 — X1 network time right now
+    chain_time_unix: i64,
+    chain_time_iso: String,
+    real_utc_iso: String,
+    drift_ms_now: f64,
+    drift_24h_mean_ms: f64,
+    drift_24h_stddev_ms: f64,
+
+    // v0.4.0 Hero #2 — validator clock health
+    n_critical: i64,
+    n_high: i64,
+    n_healthy: i64,
+    n_foundation: i64,
+    n_total: i64,
+    n_capybara_qualifying: i64,
+
+    // Existing fields (kept for backward compat with v0.3.x consumers)
     n_validators_observed: i64,
     n_samples_24h: i64,
     median_drift_ms: f64,
@@ -84,11 +108,15 @@ struct SummaryJson {
     validators_with_drift_over_5s: i64,
     latest_slot: Option<i64>,
     earliest_slot_24h: Option<i64>,
+
+    // Cluster info (de-emphasised in v0.4.0 narrative)
     n_clusters_detected: i64,
     n_validators_in_clusters: i64,
     n_singletons: i64,
     largest_cluster_size: i64,
     largest_cluster_total_stake_xnt: f64,
+    n_signature_groups: i64,
+    n_validators_in_groups: i64,
 }
 
 #[derive(Serialize)]
@@ -107,6 +135,11 @@ struct ValidatorJson {
     cluster_id: Option<i64>,
     cluster_size: i64,
     is_multi_node: bool,
+    // v0.4.0 narrative fields
+    is_foundation: bool,
+    foundation_label: Option<String>,
+    severity: Option<String>,
+    qualifies_capybara: bool,
 }
 
 #[derive(Serialize)]
@@ -146,6 +179,25 @@ struct BestValidatorJson {
     cluster_id: Option<i64>,
     cluster_size: i64,
     is_multi_node: bool,
+    // v0.4.0 narrative fields
+    is_foundation: bool,
+    foundation_label: Option<String>,
+    severity: Option<String>,
+    qualifies_capybara: bool,
+}
+
+/// v0.4.0: separate showcase for the 12 X1 Labs Foundation nodes.
+#[derive(Serialize)]
+struct FoundationJson {
+    rank: i64,
+    vote_account: String,
+    label: String,
+    mean_drift_ms: f64,
+    median_drift_ms: f64,
+    stddev_drift_ms: f64,
+    n_samples: i64,
+    stake_lamports: i64,
+    stake_xnt: f64,
 }
 
 #[derive(Serialize)]
@@ -240,8 +292,52 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         db::fetch_cluster_summary(pool).await.unwrap_or((0, 0, 0, 0, 0));
     let largest_stake_xnt = largest_stake_lamports as f64 / LAMPORTS_PER_XNT;
 
+    // v0.4.0 Hero #1: chain time vs real UTC.
+    // drift_ms_now = median of the most-recent 5min bucket (live network state).
+    // 24h trend = mean and stddev across 5min buckets in last 24h.
+    let history_since_24h = now_secs - 24 * 3600;
+    let history_24h = db::fetch_network_history(pool, history_since_24h)
+        .await
+        .unwrap_or_default();
+    let drift_ms_now = history_24h
+        .last()
+        .map(|b| b.median_drift_ms)
+        .unwrap_or(0.0);
+    let (drift_24h_mean_ms, drift_24h_stddev_ms) = mean_and_stddev(
+        history_24h.iter().map(|b| b.median_drift_ms).collect::<Vec<_>>().as_slice(),
+    );
+    let real_utc_iso = format_iso_millis(now_secs);
+    let chain_time_unix = now_secs + (drift_ms_now / 1000.0).round() as i64;
+    let chain_time_iso = format_iso(chain_time_unix);
+
+    // v0.4.0 Hero #2: severity breakdown of the validator population.
+    let n_critical = summaries.iter().filter(|s| s.severity.as_deref() == Some("critical")).count() as i64;
+    let n_high     = summaries.iter().filter(|s| s.severity.as_deref() == Some("high")).count() as i64;
+    let n_healthy  = summaries.iter().filter(|s| s.severity.as_deref() == Some("healthy")).count() as i64;
+    let n_foundation = summaries.iter().filter(|s| s.is_foundation).count() as i64;
+    let n_total = summaries.len() as i64;
+    let n_capybara_qualifying = summaries
+        .iter()
+        .filter(|s| s.last_stake_lamports >= CAPYBARA_THRESHOLD_LAMPORTS)
+        .count() as i64;
+
     let summary = SummaryJson {
         generated_at_utc: format_iso(now_secs),
+        // Hero #1
+        chain_time_unix,
+        chain_time_iso,
+        real_utc_iso,
+        drift_ms_now,
+        drift_24h_mean_ms,
+        drift_24h_stddev_ms,
+        // Hero #2
+        n_critical,
+        n_high,
+        n_healthy,
+        n_foundation,
+        n_total,
+        n_capybara_qualifying,
+        // Backward-compat
         n_validators_observed: summaries.len() as i64,
         n_samples_24h: total_samples_24h,
         median_drift_ms: median_of_medians,
@@ -251,11 +347,14 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         validators_with_drift_over_5s: drift_over_5s,
         latest_slot: latest,
         earliest_slot_24h: earliest,
+        // Cluster stats (de-emphasised, kept for analytics section)
         n_clusters_detected: n_clusters,
         n_validators_in_clusters: n_in_clusters,
         n_singletons,
         largest_cluster_size: largest_size,
         largest_cluster_total_stake_xnt: largest_stake_xnt,
+        n_signature_groups: n_clusters,
+        n_validators_in_groups: n_in_clusters,
     };
 
     let mut sorted = summaries.clone();
@@ -272,6 +371,7 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         .map(|s| {
             let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
             let weighted_impact_ms_xnt = (s.mean_drift_ms * s.last_stake_lamports as f64) / LAMPORTS_PER_XNT;
+            let qualifies_capybara = s.last_stake_lamports >= CAPYBARA_THRESHOLD_LAMPORTS;
             ValidatorJson {
                 pubkey: s.validator,
                 mean_drift_ms: s.mean_drift_ms,
@@ -287,6 +387,10 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
                 cluster_id: s.cluster_id,
                 cluster_size: s.cluster_size,
                 is_multi_node: s.is_multi_node,
+                is_foundation: s.is_foundation,
+                foundation_label: s.foundation_label,
+                severity: s.severity,
+                qualifies_capybara,
             }
         })
         .collect();
@@ -322,15 +426,23 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         latest_slot_observed: latest,
     };
 
-    // Best-synced validators: smallest abs(mean) with at least N samples.
-    let best_rows = db::get_best_synced_validators(pool, BEST_SYNCED_TOP_N, BEST_SYNCED_MIN_SAMPLES)
-        .await
-        .unwrap_or_default();
+    // Best-synced validators: smallest abs(mean) with v0.4.0 stricter
+    // filter — min 100 samples, min 1000 XNT stake (Capybara threshold),
+    // foundation excluded (they have a dedicated showcase).
+    let best_rows = db::get_best_synced_validators(
+        pool,
+        BEST_SYNCED_TOP_N,
+        BEST_SYNCED_MIN_SAMPLES,
+        CAPYBARA_THRESHOLD_LAMPORTS,
+    )
+    .await
+    .unwrap_or_default();
     let best_json: Vec<BestValidatorJson> = best_rows
         .into_iter()
         .enumerate()
         .map(|(idx, s)| {
             let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
+            let qualifies_capybara = s.last_stake_lamports >= CAPYBARA_THRESHOLD_LAMPORTS;
             BestValidatorJson {
                 rank: (idx as i64) + 1,
                 vote_account: s.validator,
@@ -345,6 +457,31 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
                 cluster_id: s.cluster_id,
                 cluster_size: s.cluster_size,
                 is_multi_node: s.is_multi_node,
+                is_foundation: s.is_foundation,
+                foundation_label: s.foundation_label,
+                severity: s.severity,
+                qualifies_capybara,
+            }
+        })
+        .collect();
+
+    // Foundation showcase — separate JSON for the X1 Labs nodes.
+    let foundation_rows = db::fetch_foundation_validators(pool).await.unwrap_or_default();
+    let foundation_json: Vec<FoundationJson> = foundation_rows
+        .into_iter()
+        .enumerate()
+        .map(|(idx, s)| {
+            let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
+            FoundationJson {
+                rank: (idx as i64) + 1,
+                vote_account: s.validator,
+                label: s.foundation_label.unwrap_or_else(|| "X1 Labs".into()),
+                mean_drift_ms: s.mean_drift_ms,
+                median_drift_ms: s.median_drift_ms,
+                stddev_drift_ms: s.stddev_drift_ms,
+                n_samples: s.n_samples,
+                stake_lamports: s.last_stake_lamports,
+                stake_xnt,
             }
         })
         .collect();
@@ -373,17 +510,36 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
     write_atomic(&data_dir.join("meta.json"), &meta).await?;
     write_atomic(&data_dir.join("best_validators.json"), &best_json).await?;
     write_atomic(&data_dir.join("chrony.json"), &chrony_json).await?;
+    write_atomic(&data_dir.join("foundation.json"), &foundation_json).await?;
 
     tracing::info!(
         n_validators = summary.n_validators_observed,
         n_samples_24h = summary.n_samples_24h,
         n_best = best_json.len(),
+        n_foundation = foundation_json.len(),
         chrony_sources = chrony_json.sources.len(),
         n_clusters = summary.n_clusters_detected,
+        n_critical = summary.n_critical,
+        n_high = summary.n_high,
+        n_capybara = summary.n_capybara_qualifying,
         n_histories,
         "wrote JSON exports"
     );
     Ok(())
+}
+
+/// Plain mean and population stddev. Returns (0, 0) for empty input.
+fn mean_and_stddev(values: &[f64]) -> (f64, f64) {
+    if values.is_empty() {
+        return (0.0, 0.0);
+    }
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    if values.len() < 2 {
+        return (mean, 0.0);
+    }
+    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    (mean, var.sqrt())
 }
 
 const VALIDATOR_HISTORY_LOOKBACK_SECS: u64 = 7 * 86400;

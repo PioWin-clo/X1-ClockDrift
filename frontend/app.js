@@ -6,48 +6,83 @@ const I18N = {
   en: {
     tagline: 'Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.',
     updated: 'updated',
-    hide_farms: 'Hide farms',
-    hero_label: 'Network drift right now',
-    hero_sub: (n, sw) => `median across ${n} validators · stake-weighted ${sw} ms`,
-    card_validators: 'Validators observed (24h)',
-    card_samples: 'Samples (24h)',
-    card_drift1s: 'Drift > 1s',
-    card_stake_drift: 'Stake-weighted drift',
+    hide_foundation: 'Hide X1 Labs',
+    capybara_qualifying_only: 'Capybara qualifying only (≥1000 XNT)',
+
+    hero1_title: 'X1 network time right now',
+    hero1_chain_time: 'X1 chain consensus',
+    hero1_real_utc: 'Real UTC',
+    hero1_drift_label: (drift) => {
+      const a = Math.abs(drift);
+      const dir = drift >= 0 ? 'ahead of' : 'behind';
+      const sign = drift >= 0 ? '+' : '−';
+      const v = a >= 1000 ? `${(a / 1000).toFixed(2)}s` : `${a.toFixed(0)} ms`;
+      return `X1 chain is ${sign}${v} ${dir} real UTC`;
+    },
+    hero1_trend_label: (mean, std, isStable) => {
+      const trend = isStable ? 'stable' : 'drifting';
+      return `24h trend: ${trend}, mean ${mean.toFixed(0)} ms ± ${std.toFixed(0)} ms`;
+    },
+
+    hero2_title: 'Validator clock health',
+    health_critical: 'Critical',
+    health_critical_sub: '>5s',
+    health_high: 'High',
+    health_high_sub: '1-5s',
+    health_healthy: 'Healthy',
+    health_healthy_sub: '<1s',
+    health_foundation: 'X1 Labs',
+    health_foundation_sub: 'separate',
+    capybara_note: (n, total, pct) =>
+      `${formatInt(n)} of ${formatInt(total)} validators (${pct}%) will qualify for the Capybara delegation upgrade (≥1000 XNT self-stake).`,
+
     chart_history_title: 'Network drift over time (last 7 days, 5-minute buckets)',
-    chart_histogram_title: 'Validator drift distribution (mean drift, top 500)',
     chart_history_median: 'X1 median drift',
     chart_history_stake: 'X1 stake-weighted',
     chart_history_sentinel: 'Sentinel offset (µs)',
     chart_axis_drift_ms: 'X1 drift (ms)',
     chart_axis_offset_us: 'Sentinel offset (µs)',
-    clusters_section_title: 'Operator clusters (identical drift signature)',
-    clusters_help: 'Validators sharing rounded (mean, stddev, p10) drift values with at least 3 members are flagged as multi-node operators.',
-    clusters_detected: 'Detected clusters',
-    cluster_validators: 'Validators in clusters',
-    largest_cluster: 'Largest cluster',
-    cluster_tooltip: (size, stake) => `Part of ${size}-validator cluster · total stake ${stake} XNT`,
+    chart_histogram_title: 'Validator drift distribution (mean drift, top 500)',
+
+    worst_table_title: 'Top worst validators',
+    worst_table_help: 'Sorted by absolute drift (worst first). Foundation nodes flagged but appear in their natural position.',
+    ranking_search_placeholder: 'search by pubkey…',
+    filter_all: 'All',
+    filter_critical: 'Critical only',
+    filter_high: 'High and worse',
+    col_rank: '#',
+    col_pubkey: 'pubkey',
+    col_drift: 'drift (ms)',
+    col_jitter: 'jitter (ms)',
+    col_n: 'n',
+    col_stake: 'stake (XNT)',
+    col_severity: 'tag',
+    col_label: 'label',
+
+    best_synced_title: 'Best synchronized validators (top 10)',
+    best_synced_help_v04: 'Validators with the smallest absolute drift. Min 1000 XNT stake (Capybara threshold), min 100 samples, foundation excluded.',
+
+    foundation_table_title: '🏛️ X1 Labs Foundation',
+    foundation_table_help: 'Official X1 Labs infrastructure. Shown separately because their drift is operational baseline, not validator misconfiguration.',
+
+    deeper_analytics: 'Deeper analytics',
+    analytics_hint: 'distribution, correlation, signature groups',
+
+    signature_groups_title: 'Drift signature groups',
+    signature_groups_help: 'Validators sharing identical drift values. May indicate shared infrastructure or coincidental NTP setup. Not necessarily "farms".',
+    clusters_detected: 'Detected groups',
+    cluster_validators: 'Validators in groups',
+    largest_cluster: 'Largest group',
+    cluster_tooltip: (size) => `Part of ${size}-validator drift signature group`,
     largest_cluster_value: (n, stake) => `${n} validators · ${stake} XNT`,
+
     scatter_title: 'Stake vs drift correlation',
     scatter_help: 'Each point is a validator. X-axis = stake (log scale). Y-axis = mean drift (ms). Cluster members share colour. Click a point for details.',
     scatter_correlation: 'Correlation',
     scatter_slope: 'Slope',
     scatter_slope_value: (slope) => `${slope.toFixed(0)} ms per 10× stake`,
     scatter_no_data: 'Insufficient data',
-    best_synced_title: 'Best synchronized validators (top 10)',
-    best_synced_help: 'Validators with the smallest absolute drift from network consensus. Minimum 5 samples required.',
-    ranking_title: 'Validator ranking (sorted by impact: drift × stake)',
-    ranking_search_placeholder: 'search by pubkey…',
-    col_rank: '#',
-    col_pubkey: 'pubkey',
-    col_mean: 'mean (ms)',
-    col_median: 'median (ms)',
-    col_stddev: 'stddev (ms)',
-    col_p10: 'p10 (ms)',
-    col_p90: 'p90 (ms)',
-    col_n: 'n',
-    col_stake: 'stake (XNT)',
-    col_impact: 'impact',
-    col_cluster: 'cluster',
+
     clock_section_title: 'My clock vs world',
     clock_wall: 'Wall clock (your browser)',
     clock_offset_label: 'Sentinel offset to UTC consensus',
@@ -56,6 +91,7 @@ const I18N = {
     clock_reference: 'Reference source',
     clock_skew_label: 'Frequency skew',
     clock_help_text: "Sentinel's system clock is compared against a consensus of independent stratum-1 atomic time sources (PTB Germany, GUM Poland, CESNET Czechia, Netnod Sweden). All X1 chain drift measurements on this dashboard are referenced against this clock.",
+
     sources_section_title: 'NTP sources (chrony calibration)',
     sources_col_operator: 'Operator',
     sources_col_country: 'Country',
@@ -64,66 +100,102 @@ const I18N = {
     sources_col_state: 'State',
     sources_col_offset: 'Offset (µs)',
     sources_col_last_rx: 'Last RX (s)',
+
     footer_repo: 'github',
     footer_methodology: 'methodology',
     prev_page: 'prev',
     next_page: 'next',
     page_info: (p, t) => `page ${p} of ${t}`,
+
     modal_mean: 'Mean drift',
     modal_stake: 'Stake',
     modal_cluster: 'Cluster',
     modal_samples: 'Samples',
+    modal_severity: 'Severity',
     modal_view_explorer: 'View on X1 Explorer',
     modal_limited_data: 'Detailed history is only kept for the top 500 most-impactful and top 10 best-synced validators.',
-    modal_close: 'Close',
-    cluster_singleton: '—',
-    cluster_value: (size) => `${size}×`,
   },
+
   pl: {
     tagline: 'Bieżący dryf <code>Clock::unix_timestamp</code> na blockchainie X1.',
     updated: 'aktualizacja',
-    hide_farms: 'Ukryj farmy',
-    hero_label: 'Dryf sieci teraz',
-    hero_sub: (n, sw) => `mediana z ${n} walidatorów · ważone stakiem ${sw} ms`,
-    card_validators: 'Obserwowani walidatorzy (24h)',
-    card_samples: 'Próbki (24h)',
-    card_drift1s: 'Dryf > 1s',
-    card_stake_drift: 'Dryf ważony stakiem',
+    hide_foundation: 'Ukryj X1 Labs',
+    capybara_qualifying_only: 'Tylko kwalifikujące się do Capybara (≥1000 XNT)',
+
+    hero1_title: 'Czas sieci X1 teraz',
+    hero1_chain_time: 'Konsensus chain X1',
+    hero1_real_utc: 'Realny UTC',
+    hero1_drift_label: (drift) => {
+      const a = Math.abs(drift);
+      const dir = drift >= 0 ? 'przed' : 'za';
+      const sign = drift >= 0 ? '+' : '−';
+      const v = a >= 1000 ? `${(a / 1000).toFixed(2)}s` : `${a.toFixed(0)} ms`;
+      return `Chain X1 jest ${sign}${v} ${dir} realnym UTC`;
+    },
+    hero1_trend_label: (mean, std, isStable) => {
+      const trend = isStable ? 'stabilny' : 'dryfujący';
+      return `Trend 24h: ${trend}, średnia ${mean.toFixed(0)} ms ± ${std.toFixed(0)} ms`;
+    },
+
+    hero2_title: 'Stan zegarów walidatorów',
+    health_critical: 'Krytyczne',
+    health_critical_sub: '>5s',
+    health_high: 'Wysokie',
+    health_high_sub: '1-5s',
+    health_healthy: 'Zdrowe',
+    health_healthy_sub: '<1s',
+    health_foundation: 'X1 Labs',
+    health_foundation_sub: 'osobno',
+    capybara_note: (n, total, pct) =>
+      `${formatInt(n)} z ${formatInt(total)} walidatorów (${pct}%) zakwalifikuje się do delegacji Capybara (≥1000 XNT self-stake).`,
+
     chart_history_title: 'Dryf sieci w czasie (ostatnie 7 dni, kubełki 5-minutowe)',
-    chart_histogram_title: 'Rozkład dryfu walidatorów (średni dryf, top 500)',
     chart_history_median: 'Mediana X1',
     chart_history_stake: 'X1 ważone stakiem',
     chart_history_sentinel: 'Odchylenie Sentinela (µs)',
     chart_axis_drift_ms: 'Dryf X1 (ms)',
     chart_axis_offset_us: 'Odchylenie Sentinela (µs)',
-    clusters_section_title: 'Klastry operatorów (identyczna sygnatura dryfu)',
-    clusters_help: 'Walidatorzy o tych samych zaokrąglonych (średnia, odch.std, p10) wartościach dryfu, w grupach co najmniej 3, są oznaczani jako operatorzy multi-node.',
-    clusters_detected: 'Wykryte klastry',
-    cluster_validators: 'Walidatorzy w klastrach',
-    largest_cluster: 'Największy klaster',
-    cluster_tooltip: (size, stake) => `Część ${size}-walidatorowego klastra · łączny stake ${stake} XNT`,
+    chart_histogram_title: 'Rozkład dryfu walidatorów (średni dryf, top 500)',
+
+    worst_table_title: 'Najgorsze walidatory',
+    worst_table_help: 'Sortowanie po bezwzględnej wartości dryfu (najgorsze najpierw). Walidatory fundacji oznaczone, ale widoczne w naturalnej kolejności.',
+    ranking_search_placeholder: 'szukaj po pubkey…',
+    filter_all: 'Wszystkie',
+    filter_critical: 'Tylko krytyczne',
+    filter_high: 'Wysokie i gorsze',
+    col_rank: '#',
+    col_pubkey: 'pubkey',
+    col_drift: 'dryf (ms)',
+    col_jitter: 'jitter (ms)',
+    col_n: 'n',
+    col_stake: 'stake (XNT)',
+    col_severity: 'tag',
+    col_label: 'label',
+
+    best_synced_title: 'Najlepiej zsynchronizowani walidatorzy (top 10)',
+    best_synced_help_v04: 'Walidatory z najmniejszym bezwzględnym dryfem. Min 1000 XNT stake (próg Capybara), min 100 próbek, fundacja wykluczona.',
+
+    foundation_table_title: '🏛️ X1 Labs Foundation',
+    foundation_table_help: 'Oficjalna infrastruktura X1 Labs. Pokazana osobno bo ich dryf jest baseline operacyjnym, nie błędem konfiguracji walidatora.',
+
+    deeper_analytics: 'Analityka szczegółowa',
+    analytics_hint: 'rozkład, korelacja, grupy sygnatur',
+
+    signature_groups_title: 'Grupy identycznego dryfu',
+    signature_groups_help: 'Walidatory dzielące identyczne wartości dryfu. Może oznaczać wspólną infrastrukturę lub przypadkowy zbieg NTP. Niekoniecznie „farmy".',
+    clusters_detected: 'Wykryte grupy',
+    cluster_validators: 'Walidatorzy w grupach',
+    largest_cluster: 'Największa grupa',
+    cluster_tooltip: (size) => `Część grupy ${size} walidatorów o identycznej sygnaturze`,
     largest_cluster_value: (n, stake) => `${n} walidatorów · ${stake} XNT`,
+
     scatter_title: 'Korelacja stake vs dryf',
-    scatter_help: 'Każdy punkt = walidator. Oś X = stake (skala log). Oś Y = średni dryf (ms). Walidatorzy w jednym klastrze mają ten sam kolor. Kliknij punkt po szczegóły.',
+    scatter_help: 'Każdy punkt = walidator. Oś X = stake (skala log). Oś Y = średni dryf (ms). Walidatory w jednym klastrze mają ten sam kolor. Kliknij punkt po szczegóły.',
     scatter_correlation: 'Korelacja',
     scatter_slope: 'Nachylenie',
     scatter_slope_value: (slope) => `${slope.toFixed(0)} ms na 10× stake`,
     scatter_no_data: 'Za mało danych',
-    best_synced_title: 'Najlepiej zsynchronizowani walidatorzy (top 10)',
-    best_synced_help: 'Walidatorzy z najmniejszym bezwzględnym dryfem od konsensusu sieci. Wymagane minimum 5 próbek.',
-    ranking_title: 'Ranking walidatorów (sortowanie po wpływie: dryf × stake)',
-    ranking_search_placeholder: 'szukaj po pubkey…',
-    col_rank: '#',
-    col_pubkey: 'pubkey',
-    col_mean: 'średnia (ms)',
-    col_median: 'mediana (ms)',
-    col_stddev: 'odch.std (ms)',
-    col_p10: 'p10 (ms)',
-    col_p90: 'p90 (ms)',
-    col_n: 'n',
-    col_stake: 'stake (XNT)',
-    col_impact: 'wpływ',
-    col_cluster: 'klaster',
+
     clock_section_title: 'Mój zegar vs świat',
     clock_wall: 'Zegar (twoja przeglądarka)',
     clock_offset_label: 'Odchylenie Sentinela od konsensusu UTC',
@@ -132,6 +204,7 @@ const I18N = {
     clock_reference: 'Źródło referencyjne',
     clock_skew_label: 'Skew częstotliwości',
     clock_help_text: 'Zegar systemowy serwera Sentinel jest porównywany z konsensusem niezależnych źródeł czasu stratum-1 (PTB Niemcy, GUM Polska, CESNET Czechy, Netnod Szwecja). Wszystkie pomiary dryfu czasu X1 na tym dashboardzie są odniesione do tego zegara.',
+
     sources_section_title: 'Źródła NTP (kalibracja chrony)',
     sources_col_operator: 'Operator',
     sources_col_country: 'Kraj',
@@ -140,20 +213,20 @@ const I18N = {
     sources_col_state: 'Stan',
     sources_col_offset: 'Odchylenie (µs)',
     sources_col_last_rx: 'Ostatni RX (s)',
+
     footer_repo: 'github',
     footer_methodology: 'metodologia',
     prev_page: 'poprzednia',
     next_page: 'następna',
     page_info: (p, t) => `strona ${p} z ${t}`,
+
     modal_mean: 'Średni dryf',
     modal_stake: 'Stake',
     modal_cluster: 'Klaster',
     modal_samples: 'Próbki',
+    modal_severity: 'Klasa',
     modal_view_explorer: 'Otwórz w X1 Explorer',
     modal_limited_data: 'Szczegółowa historia jest zapisywana tylko dla 500 walidatorów o największym wpływie i 10 najlepiej zsynchronizowanych.',
-    modal_close: 'Zamknij',
-    cluster_singleton: '—',
-    cluster_value: (size) => `${size}×`,
   },
 };
 
@@ -162,14 +235,20 @@ const CLUSTER_COLORS = [
   '#ff7b72', '#bc8cff', '#56d364', '#e3b341', '#79c0ff',
 ];
 
+const STABILITY_THRESHOLD_MS = 500;
+const CAPYBARA_THRESHOLD_XNT = 1000;
+
 const state = {
   lang: 'en',
-  hideFarms: true,
+  hideFoundation: false,
+  capybaraOnly: false,
+  severityFilter: 'all',
   summary: null,
   validators: [],
   history: [],
   meta: null,
   best: [],
+  foundation: [],
   chrony: null,
   filtered: [],
   page: 0,
@@ -178,46 +257,51 @@ const state = {
   query: '',
 };
 
-const el = {
-  updatedTs: document.getElementById('updated-ts'),
-  heroValue: document.getElementById('hero-value'),
-  heroSub: document.getElementById('hero-sub'),
-  cardValidators: document.getElementById('card-validators'),
-  cardSamples: document.getElementById('card-samples'),
-  cardDrift1s: document.getElementById('card-drift1s'),
-  cardDrift1sPct: document.getElementById('card-drift1s-pct'),
-  cardStakeDrift: document.getElementById('card-stake-drift'),
-  rankingBody: document.getElementById('ranking-body'),
-  pageInfo: document.getElementById('page-info'),
-  prev: document.getElementById('prev'),
-  next: document.getElementById('next'),
-  search: document.getElementById('search'),
-  metaLine: document.getElementById('meta-line'),
-  bestSyncedBody: document.getElementById('best-synced-body'),
-  sourcesBody: document.getElementById('sources-body'),
-  clockWall: document.getElementById('clock-wall-time'),
-  clockOffset: document.getElementById('clock-offset-value'),
-  clockRms: document.getElementById('clock-rms-value'),
-  clockStratum: document.getElementById('clock-stratum-value'),
-  clockReference: document.getElementById('clock-reference-value'),
-  clockSkew: document.getElementById('clock-skew-value'),
-  btnLangEn: document.getElementById('btn-lang-en'),
-  btnLangPl: document.getElementById('btn-lang-pl'),
-  hideFarms: document.getElementById('hide-farms'),
-  farmInfo: document.getElementById('farm-info'),
-  nClusters: document.getElementById('n-clusters'),
-  nClustered: document.getElementById('n-clustered'),
-  nClusteredPct: document.getElementById('n-clustered-pct'),
-  largestCluster: document.getElementById('largest-cluster'),
-  scatterR: document.getElementById('scatter-r'),
-  scatterSlope: document.getElementById('scatter-slope'),
-  modal: document.getElementById('validator-modal'),
-  modalPubkey: document.getElementById('modal-pubkey'),
-  modalStats: document.getElementById('modal-stats'),
-  modalEmpty: document.getElementById('modal-empty'),
-  modalClose: document.getElementById('modal-close'),
-  modalLink: document.getElementById('modal-explorer-link'),
-};
+const el = {};
+function bindElements() {
+  el.updatedTs = document.getElementById('updated-ts');
+  el.hero1ChainTime = document.getElementById('hero1-chain-time');
+  el.hero1RealUtc = document.getElementById('hero1-real-utc');
+  el.hero1Drift = document.getElementById('hero1-drift');
+  el.hero1Trend = document.getElementById('hero1-trend');
+  el.nCritical = document.getElementById('n-critical');
+  el.nHigh = document.getElementById('n-high');
+  el.nHealthy = document.getElementById('n-healthy');
+  el.nFoundation = document.getElementById('n-foundation');
+  el.capybaraNote = document.getElementById('capybara-note');
+  el.worstBody = document.getElementById('worst-body');
+  el.bestSyncedBody = document.getElementById('best-synced-body');
+  el.foundationBody = document.getElementById('foundation-body');
+  el.sourcesBody = document.getElementById('sources-body');
+  el.pageInfo = document.getElementById('page-info');
+  el.prev = document.getElementById('prev');
+  el.next = document.getElementById('next');
+  el.search = document.getElementById('search');
+  el.severityFilter = document.getElementById('severity-filter');
+  el.metaLine = document.getElementById('meta-line');
+  el.clockWall = document.getElementById('clock-wall-time');
+  el.clockOffset = document.getElementById('clock-offset-value');
+  el.clockRms = document.getElementById('clock-rms-value');
+  el.clockStratum = document.getElementById('clock-stratum-value');
+  el.clockReference = document.getElementById('clock-reference-value');
+  el.clockSkew = document.getElementById('clock-skew-value');
+  el.btnLangEn = document.getElementById('btn-lang-en');
+  el.btnLangPl = document.getElementById('btn-lang-pl');
+  el.hideFoundation = document.getElementById('hide-foundation');
+  el.capybaraOnly = document.getElementById('capybara-only');
+  el.nClusters = document.getElementById('n-clusters');
+  el.nClustered = document.getElementById('n-clustered');
+  el.nClusteredPct = document.getElementById('n-clustered-pct');
+  el.largestCluster = document.getElementById('largest-cluster');
+  el.scatterR = document.getElementById('scatter-r');
+  el.scatterSlope = document.getElementById('scatter-slope');
+  el.modal = document.getElementById('validator-modal');
+  el.modalPubkey = document.getElementById('modal-pubkey');
+  el.modalStats = document.getElementById('modal-stats');
+  el.modalEmpty = document.getElementById('modal-empty');
+  el.modalClose = document.getElementById('modal-close');
+  el.modalLink = document.getElementById('modal-explorer-link');
+}
 
 function initLanguage() {
   let lang = localStorage.getItem('lang');
@@ -229,10 +313,11 @@ function initLanguage() {
   state.lang = lang === 'pl' ? 'pl' : 'en';
 }
 
-function initFilter() {
-  const stored = localStorage.getItem('hideFarms');
-  state.hideFarms = stored === null ? true : stored === '1';
-  el.hideFarms.checked = state.hideFarms;
+function initFilters() {
+  state.hideFoundation = localStorage.getItem('hideFoundation') === '1';
+  state.capybaraOnly = localStorage.getItem('capybaraOnly') === '1';
+  el.hideFoundation.checked = state.hideFoundation;
+  el.capybaraOnly.checked = state.capybaraOnly;
 }
 
 function applyI18n() {
@@ -254,6 +339,10 @@ function applyI18n() {
     const value = t[key];
     if (typeof value === 'string') node.placeholder = value;
   });
+  document.querySelectorAll('#severity-filter option[data-i18n]').forEach((opt) => {
+    const v = t[opt.dataset.i18n];
+    if (typeof v === 'string') opt.textContent = v;
+  });
   el.btnLangEn.classList.toggle('active', lang === 'en');
   el.btnLangPl.classList.toggle('active', lang === 'pl');
 }
@@ -265,61 +354,15 @@ function setLanguage(lang) {
   renderAll();
 }
 
-el.btnLangEn.addEventListener('click', () => setLanguage('en'));
-el.btnLangPl.addEventListener('click', () => setLanguage('pl'));
-
-el.hideFarms.addEventListener('change', () => {
-  state.hideFarms = el.hideFarms.checked;
-  localStorage.setItem('hideFarms', state.hideFarms ? '1' : '0');
-  renderAll();
-});
-
-document.querySelectorAll('table.ranking th').forEach((th) => {
-  th.addEventListener('click', () => {
-    const key = th.dataset.sort;
-    if (!key) return;
-    if (state.sortKey === key || (key === 'mean_drift_ms' && state.sortKey === 'mean_drift_ms_abs')) {
-      state.sortDir = -state.sortDir;
-    } else {
-      state.sortKey = key;
-      state.sortDir = key === 'pubkey' ? 1 : -1;
-    }
-    state.page = 0;
-    renderTable();
-  });
-});
-
-el.prev.addEventListener('click', () => {
-  if (state.page > 0) { state.page--; renderTable(); }
-});
-el.next.addEventListener('click', () => {
-  const last = Math.max(0, Math.ceil(state.filtered.length / PAGE_SIZE) - 1);
-  if (state.page < last) { state.page++; renderTable(); }
-});
-
-el.search.addEventListener('input', () => {
-  state.query = el.search.value.trim().toLowerCase();
-  state.page = 0;
-  applyFilter();
-  renderTable();
-});
-
-el.modalClose.addEventListener('click', closeModal);
-el.modal.addEventListener('click', (e) => {
-  if (e.target === el.modal) closeModal();
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !el.modal.hidden) closeModal();
-});
-
 async function loadAll() {
   try {
-    const [summary, validators, history, meta, best, chrony] = await Promise.all([
+    const [summary, validators, history, meta, best, foundation, chrony] = await Promise.all([
       fetchJSON('data/summary.json'),
       fetchJSON('data/validators.json'),
       fetchJSON('data/history.json'),
       fetchJSON('data/meta.json'),
       fetchJSONOptional('data/best_validators.json'),
+      fetchJSONOptional('data/foundation.json'),
       fetchJSONOptional('data/chrony.json'),
     ]);
     state.summary = summary;
@@ -327,6 +370,7 @@ async function loadAll() {
     state.history = history || [];
     state.meta = meta;
     state.best = best || [];
+    state.foundation = foundation || [];
     state.chrony = chrony;
     renderAll();
   } catch (e) {
@@ -340,7 +384,6 @@ async function fetchJSON(path) {
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
   return await r.json();
 }
-
 async function fetchJSONOptional(path) {
   try {
     const r = await fetch(path, { cache: 'no-store' });
@@ -353,29 +396,26 @@ async function fetchJSONOptional(path) {
 }
 
 function visibleValidators() {
-  return state.hideFarms
-    ? state.validators.filter((v) => !v.is_multi_node)
-    : state.validators.slice();
-}
-
-function visibleBest() {
-  return state.hideFarms
-    ? state.best.filter((v) => !v.is_multi_node)
-    : state.best.slice();
+  return state.validators.filter((v) => {
+    if (state.hideFoundation && v.is_foundation) return false;
+    if (state.capybaraOnly && !v.qualifies_capybara) return false;
+    return true;
+  });
 }
 
 function renderAll() {
   renderHeader();
+  renderHero1();
+  renderHero2();
   renderClock();
-  renderHero();
-  renderCards();
-  renderClusters();
   renderHistoryChart();
+  applyWorstFilter();
+  renderWorstTable();
+  renderBestSynced();
+  renderFoundation();
   renderHistogram();
   renderScatter();
-  renderBestSynced();
-  applyFilter();
-  renderTable();
+  renderClusters();
   renderSources();
   renderFooter();
 }
@@ -384,8 +424,63 @@ function renderHeader() {
   if (state.summary && state.summary.generated_at_utc) {
     el.updatedTs.textContent = state.summary.generated_at_utc;
   }
-  const farmCount = state.validators.filter((v) => v.is_multi_node).length;
-  el.farmInfo.textContent = `(${formatInt(farmCount)})`;
+}
+
+let hero1TickHandle = null;
+function renderHero1() {
+  // Hero #1 ticks live: wall clock + chain time (= wall clock + drift_ms_now).
+  // No separate setInterval — we already tick wall clock at 100ms.
+  tickHero1();
+  if (!state.summary) return;
+  const t = I18N[state.lang];
+  const drift = state.summary.drift_ms_now ?? 0;
+  el.hero1Drift.textContent = t.hero1_drift_label(drift);
+  el.hero1Drift.className = 'hero1-drift ' + heroDriftColorClass(Math.abs(drift));
+  const mean = state.summary.drift_24h_mean_ms ?? 0;
+  const std = state.summary.drift_24h_stddev_ms ?? 0;
+  const isStable = std < STABILITY_THRESHOLD_MS;
+  el.hero1Trend.textContent = t.hero1_trend_label(mean, std, isStable);
+}
+
+function tickHero1() {
+  const now = new Date();
+  const driftMs = state.summary?.drift_ms_now ?? 0;
+  const chainNow = new Date(now.getTime() + driftMs);
+  el.hero1RealUtc.textContent = formatIsoMillis(now);
+  el.hero1ChainTime.textContent = formatIsoMillis(chainNow);
+}
+
+function heroDriftColorClass(absMs) {
+  if (absMs < 200) return 'good';
+  if (absMs < 1000) return 'warn';
+  return 'bad';
+}
+
+function renderHero2() {
+  // Hero #2 numbers come from the live filtered population so the
+  // toggles in the header (hide-foundation, capybara-only) actually
+  // affect the prominent counts. Fall back to summary.json values
+  // when no filtering is active, for consistency with snapshot.
+  const visible = visibleValidators();
+  const counts = {
+    critical: 0, high: 0, healthy: 0, foundation: 0, capybara: 0,
+  };
+  for (const v of visible) {
+    if (v.is_foundation) counts.foundation++;
+    else if (v.severity === 'critical') counts.critical++;
+    else if (v.severity === 'high') counts.high++;
+    else if (v.severity === 'healthy') counts.healthy++;
+    if (v.qualifies_capybara) counts.capybara++;
+  }
+  el.nCritical.textContent = formatInt(counts.critical);
+  el.nHigh.textContent = formatInt(counts.high);
+  el.nHealthy.textContent = formatInt(counts.healthy);
+  el.nFoundation.textContent = formatInt(counts.foundation);
+
+  const t = I18N[state.lang];
+  const total = visible.length;
+  const pct = total > 0 ? ((100 * counts.capybara) / total).toFixed(1) : '0.0';
+  el.capybaraNote.textContent = t.capybara_note(counts.capybara, total, pct);
 }
 
 function renderClock() {
@@ -438,76 +533,7 @@ function tickWallClock() {
   if (el.clockWall) {
     el.clockWall.textContent = `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}.${ms} UTC`;
   }
-}
-
-/// Per-validator stats recomputed from the visible (filtered) validator set.
-function visibleStats() {
-  const visible = visibleValidators();
-  if (visible.length === 0) {
-    return { count: 0, samples: 0, median: 0, mean: 0, stakeWeighted: 0, drift1s: 0, drift5s: 0 };
-  }
-  const sortedMedians = visible.map((v) => v.median_drift_ms)
-    .sort((a, b) => a - b);
-  const median = sortedMedians[Math.floor(sortedMedians.length / 2)];
-  const mean = visible.reduce((s, v) => s + v.mean_drift_ms, 0) / visible.length;
-  let num = 0, den = 0;
-  for (const v of visible) {
-    const w = v.stake_lamports || 0;
-    if (w <= 0) continue;
-    num += v.mean_drift_ms * w;
-    den += w;
-  }
-  const stakeWeighted = den > 0 ? num / den : mean;
-  return {
-    count: visible.length,
-    samples: visible.reduce((s, v) => s + (v.n_samples || 0), 0),
-    median,
-    mean,
-    stakeWeighted,
-    drift1s: visible.filter((v) => Math.abs(v.mean_drift_ms) >= 1000).length,
-    drift5s: visible.filter((v) => Math.abs(v.mean_drift_ms) >= 5000).length,
-  };
-}
-
-function renderHero() {
-  if (!state.summary) return;
-  const s = visibleStats();
-  el.heroValue.textContent = formatMs(s.median);
-  el.heroValue.className = 'hero-value ' + colorClass(Math.abs(s.median));
-  const t = I18N[state.lang];
-  el.heroSub.textContent = t.hero_sub(formatInt(s.count), formatNum(s.stakeWeighted, 1));
-}
-
-function renderCards() {
-  if (!state.summary) return;
-  const s = visibleStats();
-  el.cardValidators.textContent = formatInt(s.count);
-  el.cardSamples.textContent = formatInt(s.samples);
-  el.cardDrift1s.textContent = formatInt(s.drift1s);
-  const pct = s.count > 0 ? (100 * s.drift1s) / s.count : 0;
-  el.cardDrift1sPct.textContent = `${pct.toFixed(1)}% (>5s: ${formatInt(s.drift5s)})`;
-  el.cardStakeDrift.textContent = formatMs(s.stakeWeighted);
-}
-
-function renderClusters() {
-  if (!state.summary) return;
-  const t = I18N[state.lang];
-  const nClusters = state.summary.n_clusters_detected || 0;
-  const nIn = state.summary.n_validators_in_clusters || 0;
-  const nSing = state.summary.n_singletons || 0;
-  const total = nIn + nSing;
-  el.nClusters.textContent = formatInt(nClusters);
-  el.nClustered.textContent = formatInt(nIn);
-  el.nClusteredPct.textContent = total > 0 ? ` (${((100 * nIn) / total).toFixed(1)}%)` : '';
-  if (nClusters > 0) {
-    const stakeXnt = state.summary.largest_cluster_total_stake_xnt || 0;
-    el.largestCluster.textContent = t.largest_cluster_value(
-      formatInt(state.summary.largest_cluster_size || 0),
-      formatNum(stakeXnt, 0)
-    );
-  } else {
-    el.largestCluster.textContent = '—';
-  }
+  tickHero1();
 }
 
 let chartHistory = null;
@@ -538,16 +564,8 @@ function renderHistoryChart() {
       },
       scales: {
         x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
-        yLeft: {
-          type: 'linear', position: 'left',
-          ticks: { color: '#8b949e' }, grid: { color: '#21262d' },
-          title: { display: true, text: t.chart_axis_drift_ms, color: '#8b949e' },
-        },
-        yRight: {
-          type: 'linear', position: 'right',
-          ticks: { color: '#d29922' }, grid: { drawOnChartArea: false },
-          title: { display: true, text: t.chart_axis_offset_us, color: '#d29922' },
-        },
+        yLeft: { type: 'linear', position: 'left', ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, title: { display: true, text: t.chart_axis_drift_ms, color: '#8b949e' } },
+        yRight: { type: 'linear', position: 'right', ticks: { color: '#d29922' }, grid: { drawOnChartArea: false }, title: { display: true, text: t.chart_axis_offset_us, color: '#d29922' } },
       },
     },
   });
@@ -615,20 +633,15 @@ function renderScatter() {
     return;
   }
   const points = visible.map((v) => ({
-    x: v.stake_xnt,
-    y: v.mean_drift_ms,
-    pubkey: v.pubkey,
-    cluster: v.cluster_id,
-    raw: v,
+    x: v.stake_xnt, y: v.mean_drift_ms,
+    pubkey: v.pubkey, cluster: v.cluster_id, raw: v,
   }));
   const colors = points.map((p) => p.cluster
     ? CLUSTER_COLORS[(p.cluster - 1) % CLUSTER_COLORS.length]
     : 'rgba(150,150,150,0.55)');
-
   const reg = computeRegression(points);
   el.scatterR.textContent = `r = ${reg.r.toFixed(3)}`;
   el.scatterSlope.textContent = t.scatter_slope_value(reg.slope);
-
   const xs = points.map((p) => p.x);
   const xMin = Math.max(0.0001, Math.min(...xs));
   const xMax = Math.max(...xs);
@@ -636,28 +649,13 @@ function renderScatter() {
     { x: xMin, y: reg.intercept + reg.slope * Math.log10(xMin) },
     { x: xMax, y: reg.intercept + reg.slope * Math.log10(xMax) },
   ];
-
   if (chartScatter) chartScatter.destroy();
   chartScatter = new Chart(ctx, {
     type: 'scatter',
     data: {
       datasets: [
-        {
-          label: 'validators',
-          data: points,
-          backgroundColor: colors,
-          pointRadius: 4,
-        },
-        {
-          type: 'line',
-          label: 'trend',
-          data: lineData,
-          borderColor: '#f85149',
-          borderWidth: 1.5,
-          borderDash: [4, 4],
-          pointRadius: 0,
-          fill: false,
-        },
+        { label: 'validators', data: points, backgroundColor: colors, pointRadius: 4 },
+        { type: 'line', label: 'trend', data: lineData, borderColor: '#f85149', borderWidth: 1.5, borderDash: [4, 4], pointRadius: 0, fill: false },
       ],
     },
     options: {
@@ -683,24 +681,13 @@ function renderScatter() {
         },
       },
       scales: {
-        x: {
-          type: 'logarithmic',
-          ticks: { color: '#8b949e' },
-          grid: { color: '#21262d' },
-          title: { display: true, text: 'Stake (XNT, log)', color: '#8b949e' },
-        },
-        y: {
-          ticks: { color: '#8b949e' },
-          grid: { color: '#21262d' },
-          title: { display: true, text: 'Mean drift (ms)', color: '#8b949e' },
-        },
+        x: { type: 'logarithmic', ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, title: { display: true, text: 'Stake (XNT, log)', color: '#8b949e' } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, title: { display: true, text: 'Mean drift (ms)', color: '#8b949e' } },
       },
     },
   });
 }
 
-/// Linear regression in log10(stake) space.
-/// Returns Pearson r and slope (drift change per 10× stake).
 function computeRegression(points) {
   const n = points.length;
   if (n < 2) return { r: 0, slope: 0, intercept: 0 };
@@ -710,9 +697,7 @@ function computeRegression(points) {
   for (const p of points) {
     const dx = Math.log10(p.x) - meanX;
     const dy = p.y - meanY;
-    num += dx * dy;
-    denX += dx * dx;
-    denY += dy * dy;
+    num += dx * dy; denX += dx * dx; denY += dy * dy;
   }
   const r = (denX > 0 && denY > 0) ? num / Math.sqrt(denX * denY) : 0;
   const slope = denX > 0 ? num / denX : 0;
@@ -720,21 +705,66 @@ function computeRegression(points) {
   return { r, slope, intercept };
 }
 
+function renderClusters() {
+  if (!state.summary) return;
+  const t = I18N[state.lang];
+  const nClusters = state.summary.n_signature_groups ?? state.summary.n_clusters_detected ?? 0;
+  const nIn = state.summary.n_validators_in_groups ?? state.summary.n_validators_in_clusters ?? 0;
+  const nSing = state.summary.n_singletons ?? 0;
+  const total = nIn + nSing;
+  el.nClusters.textContent = formatInt(nClusters);
+  el.nClustered.textContent = formatInt(nIn);
+  el.nClusteredPct.textContent = total > 0 ? ` (${((100 * nIn) / total).toFixed(1)}%)` : '';
+  if (nClusters > 0) {
+    const stakeXnt = state.summary.largest_cluster_total_stake_xnt || 0;
+    el.largestCluster.textContent = t.largest_cluster_value(
+      formatInt(state.summary.largest_cluster_size || 0),
+      formatNum(stakeXnt, 0),
+    );
+  } else {
+    el.largestCluster.textContent = '—';
+  }
+}
+
 function renderBestSynced() {
   el.bestSyncedBody.innerHTML = '';
-  const visible = visibleBest();
-  visible.forEach((b) => {
+  if (!Array.isArray(state.best) || state.best.length === 0) return;
+  state.best.forEach((b) => {
     const tr = document.createElement('tr');
     tr.appendChild(td(String(b.rank)));
-    tr.appendChild(pubkeyCell(b.vote_account, b));
+    tr.appendChild(pubkeyCell(b.vote_account, { ...b, pubkey: b.vote_account }));
     const meanTd = td(formatMsRaw(b.mean_drift_ms), { num: true });
     meanTd.classList.add(bestSyncedColor(b.mean_drift_ms));
     tr.appendChild(meanTd);
     tr.appendChild(td(formatMsRaw(b.stddev_drift_ms), { num: true }));
     tr.appendChild(td(formatInt(b.n_samples), { num: true }));
     tr.appendChild(td(formatNum(b.stake_xnt, 0), { num: true }));
-    tr.appendChild(clusterCell(b));
     el.bestSyncedBody.appendChild(tr);
+  });
+}
+
+function renderFoundation() {
+  el.foundationBody.innerHTML = '';
+  if (!Array.isArray(state.foundation) || state.foundation.length === 0) return;
+  state.foundation.forEach((f) => {
+    const tr = document.createElement('tr');
+    tr.classList.add('row-foundation');
+    tr.appendChild(td(String(f.rank)));
+    tr.appendChild(td(f.label || 'X1 Labs', { mono: false }));
+    tr.appendChild(pubkeyCell(f.vote_account, {
+      pubkey: f.vote_account,
+      mean_drift_ms: f.mean_drift_ms,
+      stake_xnt: f.stake_xnt,
+      stake_lamports: f.stake_lamports,
+      n_samples: f.n_samples,
+      is_foundation: true,
+      foundation_label: f.label,
+    }));
+    tr.appendChild(driftTd(f.mean_drift_ms));
+    tr.appendChild(td(formatMsRaw(f.stddev_drift_ms), { num: true }));
+    tr.appendChild(td(formatInt(f.n_samples), { num: true }));
+    tr.appendChild(td(formatNum(f.stake_xnt, 0), { num: true }));
+    el.foundationBody.appendChild(tr);
   });
 }
 
@@ -745,10 +775,16 @@ function bestSyncedColor(ms) {
   return 'best-neutral';
 }
 
-function applyFilter() {
+function applyWorstFilter() {
   const q = state.query;
+  const sevFilter = state.severityFilter;
   const base = visibleValidators();
-  state.filtered = q ? base.filter((v) => v.pubkey.toLowerCase().includes(q)) : base.slice();
+  state.filtered = base.filter((v) => {
+    if (q && !v.pubkey.toLowerCase().includes(q)) return false;
+    if (sevFilter === 'critical' && v.severity !== 'critical') return false;
+    if (sevFilter === 'high' && v.severity !== 'critical' && v.severity !== 'high') return false;
+    return true;
+  });
   sortFiltered();
 }
 
@@ -758,38 +794,35 @@ function sortFiltered() {
   state.filtered.sort((a, b) => {
     let av, bv;
     if (key === 'mean_drift_ms_abs') {
-      av = Math.abs(a.mean_drift_ms);
-      bv = Math.abs(b.mean_drift_ms);
-    } else if (key === 'rank') {
-      return 0;
+      av = Math.abs(a.mean_drift_ms); bv = Math.abs(b.mean_drift_ms);
+    } else if (key === 'severity') {
+      const order = { critical: 4, high: 3, foundation: 2, healthy: 1 };
+      av = order[a.severity] || 0; bv = order[b.severity] || 0;
     } else {
-      av = a[key];
-      bv = b[key];
+      av = a[key]; bv = b[key];
     }
     if (typeof av === 'string') return dir * av.localeCompare(bv);
     return dir * ((av || 0) - (bv || 0));
   });
 }
 
-function renderTable() {
+function renderWorstTable() {
   sortFiltered();
   const start = state.page * PAGE_SIZE;
   const slice = state.filtered.slice(start, start + PAGE_SIZE);
-  el.rankingBody.innerHTML = '';
+  el.worstBody.innerHTML = '';
   slice.forEach((v, i) => {
     const tr = document.createElement('tr');
+    tr.classList.add(`row-${v.severity || 'unknown'}`);
+    if (v.is_foundation) tr.classList.add('row-foundation');
     tr.appendChild(td(String(start + i + 1)));
+    tr.appendChild(severityCell(v));
     tr.appendChild(pubkeyCell(v.pubkey, v));
     tr.appendChild(driftTd(v.mean_drift_ms));
-    tr.appendChild(driftTd(v.median_drift_ms));
     tr.appendChild(td(formatMsRaw(v.stddev_drift_ms), { num: true }));
-    tr.appendChild(driftTd(v.p10_drift_ms));
-    tr.appendChild(driftTd(v.p90_drift_ms));
     tr.appendChild(td(formatInt(v.n_samples), { num: true }));
     tr.appendChild(td(formatNum(v.stake_xnt, 0), { num: true }));
-    tr.appendChild(td(formatNum(v.weighted_impact_ms_xnt, 0), { num: true }));
-    tr.appendChild(clusterCell(v));
-    el.rankingBody.appendChild(tr);
+    el.worstBody.appendChild(tr);
   });
   const last = Math.max(0, Math.ceil(state.filtered.length / PAGE_SIZE) - 1);
   const t = I18N[state.lang];
@@ -798,29 +831,33 @@ function renderTable() {
   el.next.disabled = state.page >= last;
 }
 
+function severityCell(v) {
+  const e = document.createElement('td');
+  e.classList.add('severity-cell');
+  if (v.is_foundation) {
+    e.textContent = '🏛️';
+    e.title = v.foundation_label || 'X1 Labs Foundation';
+    e.classList.add('severity-foundation');
+  } else if (v.severity === 'critical') {
+    e.textContent = '🚨';
+    e.classList.add('severity-critical');
+  } else if (v.severity === 'high') {
+    e.textContent = '⚠️';
+    e.classList.add('severity-high');
+  } else if (v.severity === 'healthy') {
+    e.textContent = '·';
+    e.classList.add('severity-healthy');
+  } else {
+    e.textContent = '?';
+    e.classList.add('severity-unknown');
+  }
+  return e;
+}
+
 function pubkeyCell(pubkey, data) {
   const e = td(shorten(pubkey), { mono: true, title: pubkey });
   e.classList.add('pubkey-cell');
   e.addEventListener('click', () => openValidatorModal(data));
-  return e;
-}
-
-function clusterCell(v) {
-  const t = I18N[state.lang];
-  const isCluster = v.is_multi_node && v.cluster_size > 1;
-  const e = document.createElement('td');
-  e.className = 'cluster-cell';
-  if (isCluster) {
-    e.textContent = t.cluster_value(v.cluster_size);
-    const stakeXnt = (v.stake_xnt || 0) * v.cluster_size;
-    e.title = t.cluster_tooltip(v.cluster_size, formatNum(stakeXnt, 0));
-    if (v.cluster_id) {
-      e.style.color = CLUSTER_COLORS[(v.cluster_id - 1) % CLUSTER_COLORS.length];
-    }
-  } else {
-    e.textContent = t.cluster_singleton;
-    e.classList.add('cluster-cell-singleton');
-  }
   return e;
 }
 
@@ -844,12 +881,6 @@ function driftTd(ms) {
 function shorten(s) {
   if (!s || s.length <= 16) return s || '';
   return `${s.slice(0, 6)}…${s.slice(-6)}`;
-}
-
-function colorClass(absMs) {
-  if (absMs < 200) return 'good';
-  if (absMs < 1000) return 'warn';
-  return 'bad';
 }
 
 function offsetColorClass(absUs) {
@@ -885,6 +916,16 @@ function formatNum(n, decimals) {
   if (n === undefined || n === null || Number.isNaN(n)) return '—';
   return Number(n).toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals });
 }
+function formatIsoMillis(d) {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mi = String(d.getUTCMinutes()).padStart(2, '0');
+  const ss = String(d.getUTCSeconds()).padStart(2, '0');
+  const ms = String(d.getUTCMilliseconds()).padStart(3, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}.${ms} UTC`;
+}
 
 function renderFooter() {
   if (!state.meta) { el.metaLine.textContent = ''; return; }
@@ -902,10 +943,17 @@ async function openValidatorModal(data) {
   el.modalLink.href = `https://explorer.x1.xyz/address/${pubkey}`;
 
   const cluster = data.is_multi_node && data.cluster_size > 1
-    ? t.cluster_value(data.cluster_size) + (data.cluster_id ? ` (#${data.cluster_id})` : '')
+    ? `${data.cluster_size}× group${data.cluster_id ? ` #${data.cluster_id}` : ''}`
     : '—';
+  let severityDisplay = '—';
+  if (data.is_foundation) severityDisplay = `🏛️ ${data.foundation_label || 'X1 Labs'}`;
+  else if (data.severity === 'critical') severityDisplay = '🚨 critical';
+  else if (data.severity === 'high') severityDisplay = '⚠️ high';
+  else if (data.severity === 'healthy') severityDisplay = '✅ healthy';
+
   el.modalStats.innerHTML = '';
   const stats = [
+    [t.modal_severity, severityDisplay],
     [t.modal_mean, formatMs(data.mean_drift_ms)],
     [t.modal_stake, `${formatNum(data.stake_xnt, 0)} XNT`],
     [t.modal_cluster, cluster],
@@ -926,10 +974,7 @@ async function openValidatorModal(data) {
 
   try {
     const r = await fetch(`data/validators/${pubkey}.json`, { cache: 'no-store' });
-    if (!r.ok) {
-      el.modalEmpty.hidden = false;
-      return;
-    }
+    if (!r.ok) { el.modalEmpty.hidden = false; return; }
     const history = await r.json();
     renderModalChart(history.buckets || []);
   } catch (e) {
@@ -953,13 +998,9 @@ function renderModalChart(buckets) {
     data: {
       labels,
       datasets: [{
-        label: 'drift (ms)',
-        data: drift,
-        borderColor: '#58a6ff',
-        backgroundColor: 'transparent',
-        pointRadius: 0,
-        borderWidth: 1.5,
-        tension: 0.2,
+        label: 'drift (ms)', data: drift,
+        borderColor: '#58a6ff', backgroundColor: 'transparent',
+        pointRadius: 0, borderWidth: 1.5, tension: 0.2,
       }],
     },
     options: chartCommonOpts({ yLabel: 'drift (ms)' }),
@@ -971,9 +1012,56 @@ function closeModal() {
   if (modalChart) { modalChart.destroy(); modalChart = null; }
 }
 
+function wireEventHandlers() {
+  el.btnLangEn.addEventListener('click', () => setLanguage('en'));
+  el.btnLangPl.addEventListener('click', () => setLanguage('pl'));
+  el.hideFoundation.addEventListener('change', () => {
+    state.hideFoundation = el.hideFoundation.checked;
+    localStorage.setItem('hideFoundation', state.hideFoundation ? '1' : '0');
+    renderAll();
+  });
+  el.capybaraOnly.addEventListener('change', () => {
+    state.capybaraOnly = el.capybaraOnly.checked;
+    localStorage.setItem('capybaraOnly', state.capybaraOnly ? '1' : '0');
+    renderAll();
+  });
+  el.severityFilter.addEventListener('change', () => {
+    state.severityFilter = el.severityFilter.value;
+    state.page = 0;
+    applyWorstFilter();
+    renderWorstTable();
+  });
+  document.querySelectorAll('table.worst-table th[data-sort]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (!key) return;
+      if (state.sortKey === key) state.sortDir = -state.sortDir;
+      else { state.sortKey = key; state.sortDir = key === 'pubkey' ? 1 : -1; }
+      state.page = 0;
+      renderWorstTable();
+    });
+  });
+  el.prev.addEventListener('click', () => { if (state.page > 0) { state.page--; renderWorstTable(); } });
+  el.next.addEventListener('click', () => {
+    const last = Math.max(0, Math.ceil(state.filtered.length / PAGE_SIZE) - 1);
+    if (state.page < last) { state.page++; renderWorstTable(); }
+  });
+  el.search.addEventListener('input', () => {
+    state.query = el.search.value.trim().toLowerCase();
+    state.page = 0;
+    applyWorstFilter();
+    renderWorstTable();
+  });
+  el.modalClose.addEventListener('click', closeModal);
+  el.modal.addEventListener('click', (e) => { if (e.target === el.modal) closeModal(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el.modal.hidden) closeModal(); });
+}
+
+bindElements();
 initLanguage();
-initFilter();
+initFilters();
 applyI18n();
+wireEventHandlers();
 tickWallClock();
 setInterval(tickWallClock, 100);
 loadAll();

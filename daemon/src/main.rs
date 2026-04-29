@@ -8,6 +8,7 @@ mod chrony_reader;
 mod config;
 mod db;
 mod exporter;
+mod foundation;
 mod git_pusher;
 mod kill_switch_watcher;
 mod log_tail;

@@ -28,6 +28,9 @@ pub struct ValidatorSummary {
     pub cluster_id: Option<i64>,
     pub cluster_size: i64,
     pub is_multi_node: bool,
+    pub is_foundation: bool,
+    pub foundation_label: Option<String>,
+    pub severity: Option<String>,
 }
 
 /// One cluster row produced by the cluster-detection query.
@@ -129,7 +132,10 @@ CREATE TABLE IF NOT EXISTS validator_drift_summary (
     updated_at INTEGER NOT NULL,
     cluster_id INTEGER,
     cluster_size INTEGER DEFAULT 1,
-    is_multi_node INTEGER DEFAULT 0
+    is_multi_node INTEGER DEFAULT 0,
+    is_foundation INTEGER DEFAULT 0,
+    foundation_label TEXT,
+    severity TEXT
 );
 
 CREATE TABLE IF NOT EXISTS network_drift_history (
@@ -219,6 +225,7 @@ pub async fn init(path: &str) -> Result<Pool> {
         }
     }
     migrate_v3(&pool).await?;
+    migrate_v4(&pool).await?;
     Ok(pool)
 }
 
@@ -263,6 +270,84 @@ async fn migrate_v3(pool: &Pool) -> Result<()> {
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// v0.4.0 migration: add foundation/severity columns to
+/// `validator_drift_summary`, then flag known X1 Labs Foundation rows.
+/// Idempotent — safe to run on fresh installs (where columns already exist
+/// from SCHEMA) and on existing v0.3.x DBs.
+async fn migrate_v4(pool: &Pool) -> Result<()> {
+    let rows = sqlx::query("PRAGMA table_info(validator_drift_summary)")
+        .fetch_all(pool)
+        .await?;
+    let cols: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("name").unwrap_or_default())
+        .collect();
+
+    if !cols.iter().any(|c| c == "is_foundation") {
+        sqlx::query("ALTER TABLE validator_drift_summary ADD COLUMN is_foundation INTEGER DEFAULT 0")
+            .execute(pool)
+            .await?;
+        tracing::info!("migrate_v4: added is_foundation");
+    }
+    if !cols.iter().any(|c| c == "foundation_label") {
+        sqlx::query("ALTER TABLE validator_drift_summary ADD COLUMN foundation_label TEXT")
+            .execute(pool)
+            .await?;
+        tracing::info!("migrate_v4: added foundation_label");
+    }
+    if !cols.iter().any(|c| c == "severity") {
+        sqlx::query("ALTER TABLE validator_drift_summary ADD COLUMN severity TEXT")
+            .execute(pool)
+            .await?;
+        tracing::info!("migrate_v4: added severity");
+    }
+
+    flag_foundation_validators(pool).await?;
+    Ok(())
+}
+
+/// One-shot UPDATE that flags known X1 Labs Foundation pubkeys in
+/// `validator_drift_summary`. Idempotent — re-running just refreshes
+/// the labels. Called both from `migrate_v4` (so existing rows are
+/// labelled even before the next recompute cycle) and is no-op for
+/// rows that don't yet exist (the recompute_validator_summaries INSERT
+/// also sets these fields directly).
+pub async fn flag_foundation_validators(pool: &Pool) -> Result<usize> {
+    let mut count = 0usize;
+    for f in crate::foundation::X1_LABS_FOUNDATION {
+        let res = sqlx::query(
+            "UPDATE validator_drift_summary \
+             SET is_foundation = 1, foundation_label = ?1 \
+             WHERE validator = ?2",
+        )
+        .bind(f.label)
+        .bind(f.vote_account)
+        .execute(pool)
+        .await?;
+        count += res.rows_affected() as usize;
+    }
+    Ok(count)
+}
+
+/// Severity bucket for a validator given their drift stats and foundation
+/// status. Returns None for under-sampled validators (n_samples < 5).
+pub fn classify_severity(n_samples: i64, mean_drift_ms: f64, is_foundation: bool) -> Option<&'static str> {
+    if n_samples < 5 {
+        return None;
+    }
+    if is_foundation {
+        return Some("foundation");
+    }
+    let abs = mean_drift_ms.abs();
+    if abs > 5000.0 {
+        Some("critical")
+    } else if abs > 1000.0 {
+        Some("high")
+    } else {
+        Some("healthy")
+    }
 }
 
 pub async fn record_slot_obs(pool: &Pool, slot: u64, ts_local_us: i64) -> Result<()> {
@@ -461,11 +546,21 @@ pub async fn recompute_validator_summaries(pool: &Pool) -> Result<usize> {
         let stats = Stats::from_sorted(&drifts);
         let stake = stake_map.get(&validator).copied().unwrap_or(0);
 
+        // v0.4.0: foundation lookup + severity classification at INSERT time
+        // so the row carries correct flags from the moment it lands. Avoids
+        // a second-pass UPDATE and a window where the dashboard could read
+        // unflagged rows.
+        let foundation_node = crate::foundation::lookup_foundation(&validator);
+        let is_foundation: i64 = if foundation_node.is_some() { 1 } else { 0 };
+        let foundation_label: Option<&'static str> = foundation_node.map(|f| f.label);
+        let severity = classify_severity(stats.n as i64, stats.mean, is_foundation == 1);
+
         sqlx::query(
             "INSERT INTO validator_drift_summary \
              (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
-              p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+              p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+              is_foundation, foundation_label, severity) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )
         .bind(&validator)
         .bind(stats.n as i64)
@@ -477,6 +572,9 @@ pub async fn recompute_validator_summaries(pool: &Pool) -> Result<usize> {
         .bind(last_seen_slot)
         .bind(stake)
         .bind(now)
+        .bind(is_foundation)
+        .bind(foundation_label)
+        .bind(severity)
         .execute(&mut *tx)
         .await?;
         written += 1;
@@ -485,7 +583,9 @@ pub async fn recompute_validator_summaries(pool: &Pool) -> Result<usize> {
 
     // Phase 2 (v0.3.0): detect operator clusters from drift signature.
     // Singletons keep cluster_id NULL, cluster_size 1, is_multi_node 0
-    // — those are the schema defaults set by the INSERT above.
+    // — those are the schema defaults set by the INSERT above. Foundation
+    // rows are excluded from cluster detection in v0.4.0 so their shared
+    // infrastructure isn't reported as a "farm".
     if let Err(e) = detect_and_assign_clusters(pool).await {
         tracing::warn!(error = %e, "cluster detection failed");
     }
@@ -514,6 +614,10 @@ pub async fn detect_and_assign_clusters(pool: &Pool) -> Result<()> {
     // a `cluster_size` column, and SQLite would resolve `HAVING cluster_size`
     // against that column (always 1 from the UPDATE above) instead of the
     // COUNT aggregate, silently producing zero clusters.
+    //
+    // `is_foundation = 0` filter: X1 Labs Foundation nodes share infra by
+    // design and would otherwise show up as the largest "farm". They get
+    // a dedicated showcase section instead.
     let rows = sqlx::query(
         "SELECT \
             CAST(round(mean_drift_ms) AS INTEGER) AS r_mean, \
@@ -522,7 +626,7 @@ pub async fn detect_and_assign_clusters(pool: &Pool) -> Result<()> {
             COUNT(*) AS group_size, \
             GROUP_CONCAT(validator) AS members \
          FROM validator_drift_summary \
-         WHERE n_samples >= 5 \
+         WHERE n_samples >= 5 AND is_foundation = 0 \
          GROUP BY r_mean, r_stddev, r_p10 \
          HAVING group_size >= 3 \
          ORDER BY group_size DESC, r_mean ASC",
@@ -638,7 +742,8 @@ pub async fn fetch_validator_summaries(pool: &Pool) -> Result<Vec<ValidatorSumma
     let rows = sqlx::query(
         "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
                 p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
-                cluster_id, cluster_size, is_multi_node \
+                cluster_id, cluster_size, is_multi_node, \
+                is_foundation, foundation_label, severity \
          FROM validator_drift_summary",
     )
     .fetch_all(pool)
@@ -660,6 +765,48 @@ pub async fn fetch_validator_summaries(pool: &Pool) -> Result<Vec<ValidatorSumma
             cluster_id: r.try_get::<Option<i64>, _>("cluster_id").unwrap_or(None),
             cluster_size: r.try_get("cluster_size").unwrap_or(1),
             is_multi_node: r.try_get::<i64, _>("is_multi_node").unwrap_or(0) != 0,
+            is_foundation: r.try_get::<i64, _>("is_foundation").unwrap_or(0) != 0,
+            foundation_label: r.try_get::<Option<String>, _>("foundation_label").unwrap_or(None),
+            severity: r.try_get::<Option<String>, _>("severity").unwrap_or(None),
+        });
+    }
+    Ok(out)
+}
+
+/// Foundation validators only, sorted by absolute mean drift descending
+/// (worst drifters first — that's what the operator wants to see).
+pub async fn fetch_foundation_validators(pool: &Pool) -> Result<Vec<ValidatorSummary>> {
+    let rows = sqlx::query(
+        "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                cluster_id, cluster_size, is_multi_node, \
+                is_foundation, foundation_label, severity \
+         FROM validator_drift_summary \
+         WHERE is_foundation = 1 \
+         ORDER BY ABS(mean_drift_ms) DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        out.push(ValidatorSummary {
+            validator: r.try_get("validator")?,
+            n_samples: r.try_get("n_samples")?,
+            mean_drift_ms: r.try_get("mean_drift_ms")?,
+            median_drift_ms: r.try_get("median_drift_ms")?,
+            stddev_drift_ms: r.try_get("stddev_drift_ms")?,
+            p10_drift_ms: r.try_get("p10_drift_ms")?,
+            p90_drift_ms: r.try_get("p90_drift_ms")?,
+            last_seen_slot: r.try_get("last_seen_slot")?,
+            last_stake_lamports: r.try_get("last_stake_lamports")?,
+            updated_at: r.try_get("updated_at")?,
+            cluster_id: r.try_get::<Option<i64>, _>("cluster_id").unwrap_or(None),
+            cluster_size: r.try_get("cluster_size").unwrap_or(1),
+            is_multi_node: r.try_get::<i64, _>("is_multi_node").unwrap_or(0) != 0,
+            is_foundation: r.try_get::<i64, _>("is_foundation").unwrap_or(0) != 0,
+            foundation_label: r.try_get::<Option<String>, _>("foundation_label").unwrap_or(None),
+            severity: r.try_get::<Option<String>, _>("severity").unwrap_or(None),
         });
     }
     Ok(out)
@@ -879,21 +1026,31 @@ pub async fn fetch_chrony_sources(pool: &Pool) -> Result<Vec<ChronySource>> {
     Ok(out)
 }
 
+/// Best-synced ranking with v0.4.0 filter changes:
+///   * `min_samples` — minimum measurements (default 100 in exporter, was 5)
+///   * `min_stake_lamports` — filter out tiny "farm" validators that
+///     happen to have low jitter due to extreme self-staking strategies
+///   * Foundation excluded (they have a dedicated showcase section)
 pub async fn get_best_synced_validators(
     pool: &Pool,
     limit: i64,
     min_samples: i64,
+    min_stake_lamports: i64,
 ) -> Result<Vec<ValidatorSummary>> {
     let rows = sqlx::query(
         "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
                 p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
-                cluster_id, cluster_size, is_multi_node \
+                cluster_id, cluster_size, is_multi_node, \
+                is_foundation, foundation_label, severity \
          FROM validator_drift_summary \
          WHERE n_samples >= ?1 \
+           AND last_stake_lamports >= ?2 \
+           AND is_foundation = 0 \
          ORDER BY ABS(mean_drift_ms) ASC \
-         LIMIT ?2",
+         LIMIT ?3",
     )
     .bind(min_samples)
+    .bind(min_stake_lamports)
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -914,6 +1071,9 @@ pub async fn get_best_synced_validators(
             cluster_id: r.try_get::<Option<i64>, _>("cluster_id").unwrap_or(None),
             cluster_size: r.try_get("cluster_size").unwrap_or(1),
             is_multi_node: r.try_get::<i64, _>("is_multi_node").unwrap_or(0) != 0,
+            is_foundation: r.try_get::<i64, _>("is_foundation").unwrap_or(0) != 0,
+            foundation_label: r.try_get::<Option<String>, _>("foundation_label").unwrap_or(None),
+            severity: r.try_get::<Option<String>, _>("severity").unwrap_or(None),
         });
     }
     Ok(out)
@@ -1559,60 +1719,293 @@ mod tests {
 
     /// Insert synthetic validator_drift_summary rows and verify
     /// `get_best_synced_validators` orders by absolute mean drift ascending,
-    /// applies the min_samples filter, and respects the limit.
+    /// applies the min_samples + min_stake filters, excludes foundation,
+    /// and respects the limit. Updated for v0.4.0 signature.
     #[tokio::test]
     async fn get_best_synced_orders_and_filters() {
         let pool = init(":memory:").await.unwrap();
         let now = chrono::Utc::now().timestamp();
 
+        // Rows: (validator, n_samples, mean_drift, stake_lamports, is_foundation)
         let rows = [
-            // (validator, n_samples, mean_drift_ms, stake)
-            ("BIG_DRIFT_HIGH_N", 100i64, 5000.0, 1_000_000_000i64),
-            ("TINY_DRIFT_LOW_N", 3, 0.5, 100_000_000),
-            ("TINY_DRIFT_HIGH_N", 50, 1.2, 500_000_000),
-            ("ZERO_DRIFT", 8, 0.0, 200_000_000),
-            ("NEGATIVE_TINY", 20, -2.4, 300_000_000),
-            ("MEDIUM_DRIFT", 7, 50.0, 400_000_000),
+            ("BIG_DRIFT_HIGH_N",  100i64, 5000.0, 1_000_000_000i64, 0i64),
+            ("TINY_DRIFT_LOW_N",  3,      0.5,    100_000_000,      0),
+            ("TINY_DRIFT_HIGH_N", 50,     1.2,    500_000_000,      0),
+            ("ZERO_DRIFT",        8,      0.0,    200_000_000,      0),
+            ("NEGATIVE_TINY",     20,     -2.4,   300_000_000,      0),
+            ("MEDIUM_DRIFT",      7,      50.0,   400_000_000,      0),
+            // Foundation node — should be excluded even though tiny drift
+            ("FOUNDATION_NODE",   100,    0.1,    50_000_000_000,   1),
         ];
-        for (v, n, mean, stake) in rows.iter() {
+        for (v, n, mean, stake, is_foundation) in rows.iter() {
             sqlx::query(
                 "INSERT INTO validator_drift_summary \
                  (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
-                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
-                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5)",
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                  is_foundation) \
+                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5, ?6)",
             )
             .bind(*v)
             .bind(*n)
             .bind(*mean)
             .bind(*stake)
             .bind(now)
+            .bind(*is_foundation)
             .execute(&pool)
             .await
             .unwrap();
         }
 
-        // min_samples=5 excludes TINY_DRIFT_LOW_N (n=3); top 3 by |mean|
-        // among the remaining is ZERO_DRIFT (0), TINY_DRIFT_HIGH_N (1.2),
-        // NEGATIVE_TINY (2.4).
-        let best = get_best_synced_validators(&pool, 3, 5).await.unwrap();
+        // min_samples=5, min_stake=0 — TINY_DRIFT_LOW_N (n=3) excluded,
+        // FOUNDATION_NODE excluded by is_foundation filter.
+        // Top 3 by |mean|: ZERO_DRIFT (0), TINY_DRIFT_HIGH_N (1.2), NEGATIVE_TINY (2.4).
+        let best = get_best_synced_validators(&pool, 3, 5, 0).await.unwrap();
         assert_eq!(best.len(), 3);
         assert_eq!(best[0].validator, "ZERO_DRIFT");
         assert_eq!(best[1].validator, "TINY_DRIFT_HIGH_N");
         assert_eq!(best[2].validator, "NEGATIVE_TINY");
-        for w in best.windows(2) {
-            assert!(
-                w[0].mean_drift_ms.abs() <= w[1].mean_drift_ms.abs(),
-                "results not sorted by abs(mean) ascending"
-            );
+        // Foundation node should not appear regardless of how good its drift is.
+        for v in &best {
+            assert_ne!(v.validator, "FOUNDATION_NODE");
         }
 
-        // limit honoured even when more rows would qualify
-        let best_limit_1 = get_best_synced_validators(&pool, 1, 5).await.unwrap();
+        // min_stake=400_000_000 — only TINY_DRIFT_HIGH_N (500M), MEDIUM_DRIFT (400M),
+        // BIG_DRIFT_HIGH_N (1B) qualify (foundation still excluded).
+        let with_min_stake = get_best_synced_validators(&pool, 10, 5, 400_000_000).await.unwrap();
+        let pubkeys: Vec<&str> = with_min_stake.iter().map(|v| v.validator.as_str()).collect();
+        assert!(pubkeys.contains(&"TINY_DRIFT_HIGH_N"));
+        assert!(pubkeys.contains(&"MEDIUM_DRIFT"));
+        assert!(pubkeys.contains(&"BIG_DRIFT_HIGH_N"));
+        assert!(!pubkeys.contains(&"ZERO_DRIFT"), "ZERO_DRIFT (200M stake) should be filtered");
+
+        // limit=1 honoured
+        let best_limit_1 = get_best_synced_validators(&pool, 1, 5, 0).await.unwrap();
         assert_eq!(best_limit_1.len(), 1);
         assert_eq!(best_limit_1[0].validator, "ZERO_DRIFT");
 
-        // min_samples=200 filters everyone out
-        let none = get_best_synced_validators(&pool, 10, 200).await.unwrap();
+        // min_samples=200 filters everyone out (except none qualify)
+        let none = get_best_synced_validators(&pool, 10, 200, 0).await.unwrap();
         assert!(none.is_empty());
+    }
+
+    /// Regression guard for the v0.3.x → v0.4.0 production migration.
+    /// Builds a SQLite database with the v0.3.x schema (cluster_* columns
+    /// from migrate_v3, but no is_foundation/foundation_label/severity),
+    /// inserts representative data including a known foundation pubkey,
+    /// then calls `init()` and asserts:
+    ///   1. `init()` succeeds.
+    ///   2. New columns `is_foundation`, `foundation_label`, `severity` exist.
+    ///   3. Foundation row gets `is_foundation = 1` + correct label.
+    ///   4. Non-foundation row gets `is_foundation = 0`, NULL label.
+    ///   5. `severity` is NULL initially (set by next recompute, not by migrate).
+    ///   6. All pre-existing data (counts, values) preserved.
+    #[tokio::test]
+    async fn migration_v3_to_v4_preserves_data() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        let path = std::env::temp_dir().join(format!(
+            "x1cd_migration_v4_test_{}_{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path_str = path.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&path);
+
+        // v0.3.x schema: same as v0.2 + cluster_* columns + chrony_tracking_history.
+        // No is_foundation, no foundation_label, no severity.
+        const V3_SCHEMA: &str = r#"
+            CREATE TABLE slot_obs (slot INTEGER PRIMARY KEY, ts_local_us INTEGER NOT NULL);
+            CREATE INDEX idx_slot_obs_ts ON slot_obs(ts_local_us);
+            CREATE TABLE vote_records (
+                slot INTEGER NOT NULL,
+                block_slot INTEGER NOT NULL,
+                validator TEXT NOT NULL,
+                ts_chain INTEGER NOT NULL,
+                PRIMARY KEY (slot, validator, block_slot)
+            );
+            CREATE INDEX idx_vote_records_validator ON vote_records(validator);
+            CREATE INDEX idx_vote_records_slot ON vote_records(slot);
+            CREATE TABLE stake_snap (
+                snapshot_ts INTEGER NOT NULL,
+                validator TEXT NOT NULL,
+                stake_lamports INTEGER NOT NULL,
+                PRIMARY KEY (snapshot_ts, validator)
+            );
+            CREATE TABLE validator_drift_summary (
+                validator TEXT PRIMARY KEY,
+                n_samples INTEGER NOT NULL,
+                mean_drift_ms REAL NOT NULL,
+                median_drift_ms REAL NOT NULL,
+                stddev_drift_ms REAL NOT NULL,
+                p10_drift_ms REAL NOT NULL,
+                p90_drift_ms REAL NOT NULL,
+                last_seen_slot INTEGER NOT NULL,
+                last_stake_lamports INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                cluster_id INTEGER,
+                cluster_size INTEGER DEFAULT 1,
+                is_multi_node INTEGER DEFAULT 0
+            );
+            CREATE INDEX idx_drift_summary_cluster ON validator_drift_summary(cluster_id);
+            CREATE TABLE network_drift_history (
+                bucket_ts INTEGER PRIMARY KEY,
+                median_drift_ms REAL NOT NULL,
+                mean_drift_ms REAL NOT NULL,
+                stake_weighted_drift_ms REAL NOT NULL,
+                n_validators INTEGER NOT NULL,
+                n_samples INTEGER NOT NULL
+            );
+            CREATE TABLE error_log (
+                ts INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                message TEXT NOT NULL
+            );
+            CREATE INDEX idx_error_log_ts ON error_log(ts);
+            CREATE TABLE chrony_tracking (
+                id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+                updated_at INTEGER NOT NULL,
+                reference_id TEXT,
+                reference_ip TEXT,
+                stratum INTEGER,
+                ref_time_unix REAL,
+                system_offset_seconds REAL,
+                last_offset_seconds REAL,
+                rms_offset_seconds REAL,
+                frequency_ppm REAL,
+                residual_freq_ppm REAL,
+                skew_ppm REAL,
+                root_delay_seconds REAL,
+                root_dispersion_seconds REAL,
+                update_interval_seconds REAL,
+                leap_status TEXT
+            );
+            CREATE TABLE chrony_sources (
+                ip TEXT PRIMARY KEY,
+                hostname TEXT NOT NULL,
+                operator TEXT NOT NULL,
+                country_code TEXT,
+                country_name TEXT,
+                mode TEXT,
+                state TEXT,
+                stratum INTEGER,
+                poll_log2 INTEGER,
+                reach INTEGER,
+                last_rx_seconds INTEGER,
+                last_sample_offset_seconds REAL,
+                last_sample_original_seconds REAL,
+                last_sample_error_seconds REAL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE chrony_tracking_history (
+                bucket_ts INTEGER PRIMARY KEY,
+                avg_system_offset_us REAL NOT NULL,
+                avg_rms_offset_us REAL NOT NULL,
+                sample_count INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+        "#;
+
+        // One known foundation pubkey + one regular validator.
+        const FOUNDATION_PUBKEY: &str = "6Wf81YuCHu3j7xJupCq5mxDWz8seuNkybyT9riVm5FeA";
+
+        {
+            let opts = SqliteConnectOptions::from_str(&format!("sqlite://{path_str}"))
+                .unwrap()
+                .create_if_missing(true);
+            let setup_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .unwrap();
+
+            for stmt in V3_SCHEMA.split(';') {
+                let s = stmt.trim();
+                if !s.is_empty() {
+                    sqlx::query(s).execute(&setup_pool).await.unwrap();
+                }
+            }
+
+            // Insert a foundation row + a regular row in v0.3.x format.
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
+                 VALUES (?1, 156, -883.1, -990.0, 297.0, -1151.0, -555.0, 100, 58000000000000000, 1700000000)",
+            )
+            .bind(FOUNDATION_PUBKEY)
+            .execute(&setup_pool).await.unwrap();
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
+                 VALUES ('REGULAR_VALIDATOR_X', 50, 25.0, 25.0, 5.0, 18.0, 32.0, 99, 1000000000, 1700000000)",
+            )
+            .execute(&setup_pool).await.unwrap();
+
+            // Some other v0.3.x data.
+            sqlx::query("INSERT INTO slot_obs (slot, ts_local_us) VALUES (1, 1700000000000000)")
+                .execute(&setup_pool).await.unwrap();
+            sqlx::query("INSERT INTO chrony_tracking_history (bucket_ts, avg_system_offset_us, avg_rms_offset_us, sample_count, updated_at) VALUES (1700000000, -7.0, 14.0, 5, 1700000000)")
+                .execute(&setup_pool).await.unwrap();
+
+            setup_pool.close().await;
+        }
+
+        let pool = init(&path_str).await.expect("init() must succeed on v0.3.x schema");
+
+        // Verify columns added.
+        let cols = sqlx::query("PRAGMA table_info(validator_drift_summary)")
+            .fetch_all(&pool).await.unwrap();
+        let names: Vec<String> = cols
+            .iter()
+            .map(|r| r.try_get::<String, _>("name").unwrap_or_default())
+            .collect();
+        for c in &["is_foundation", "foundation_label", "severity"] {
+            assert!(
+                names.iter().any(|n| n == *c),
+                "missing column after migration: {c}"
+            );
+        }
+
+        // Verify foundation flag applied.
+        let row = sqlx::query("SELECT is_foundation, foundation_label, severity FROM validator_drift_summary WHERE validator = ?1")
+            .bind(FOUNDATION_PUBKEY)
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(row.try_get::<i64, _>("is_foundation").unwrap(), 1);
+        assert_eq!(
+            row.try_get::<String, _>("foundation_label").unwrap(),
+            "X1 Labs (node8)",
+        );
+        // severity is set later (by recompute), not by migrate.
+        let sev: Option<String> = row.try_get("severity").unwrap_or(None);
+        assert!(sev.is_none(), "severity should be NULL until recompute runs");
+
+        // Non-foundation row stays non-foundation, NULL label.
+        let row2 = sqlx::query("SELECT is_foundation, foundation_label FROM validator_drift_summary WHERE validator = 'REGULAR_VALIDATOR_X'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(row2.try_get::<i64, _>("is_foundation").unwrap(), 0);
+        let label2: Option<String> = row2.try_get("foundation_label").unwrap_or(None);
+        assert!(label2.is_none());
+
+        // Pre-existing data preserved.
+        let n_summary: i64 = sqlx::query("SELECT COUNT(*) AS n FROM validator_drift_summary")
+            .fetch_one(&pool).await.unwrap().try_get("n").unwrap();
+        assert_eq!(n_summary, 2);
+        let n_chrony_history: i64 = sqlx::query("SELECT COUNT(*) AS n FROM chrony_tracking_history")
+            .fetch_one(&pool).await.unwrap().try_get("n").unwrap();
+        assert_eq!(n_chrony_history, 1);
+
+        // classify_severity helper sanity.
+        assert_eq!(classify_severity(2, 0.0, false), None);
+        assert_eq!(classify_severity(10, 6000.0, false), Some("critical"));
+        assert_eq!(classify_severity(10, 2000.0, false), Some("high"));
+        assert_eq!(classify_severity(10, 100.0, false), Some("healthy"));
+        assert_eq!(classify_severity(10, 50.0, true), Some("foundation"));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
     }
 }
