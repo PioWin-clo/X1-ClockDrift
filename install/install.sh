@@ -8,7 +8,9 @@ FRONTEND_DIR="$INSTALL_DIR/frontend"
 KEY_PATH="/home/x1pio/.ssh/x1cd_deploy_key"
 GH_REPO="git@github.com:PioWin-clo/X1-ClockDrift.git"
 BIN_NAME="x1cd"
-BIN_URL="https://github.com/PioWin-clo/X1-ClockDrift/releases/latest/download/x1cd-linux-x86_64"
+RELEASE_BASE="https://github.com/PioWin-clo/X1-ClockDrift/releases/latest/download"
+TARBALL="x1cd-linux-x86_64.tar.gz"
+CHECKSUM="${TARBALL}.sha256"
 SERVICE_FILE_LOCAL="$(dirname "$0")/strontium-meter.service"
 SERVICE_FILE_DST="/etc/systemd/system/x1cd.service"
 
@@ -24,12 +26,23 @@ chmod 0755 "$INSTALL_DIR"
 if [ -f "$BIN_DIR/$BIN_NAME" ] && [ "${SKIP_DOWNLOAD:-0}" = "1" ]; then
   echo "==> Skipping binary download (SKIP_DOWNLOAD=1)"
 else
-  echo "==> Downloading $BIN_NAME from $BIN_URL"
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+
+  echo "==> Downloading $TARBALL and SHA256 from $RELEASE_BASE"
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 -o "$BIN_DIR/$BIN_NAME" "$BIN_URL"
+    curl -fL --retry 3 -o "$TMP/$TARBALL"  "$RELEASE_BASE/$TARBALL"
+    curl -fL --retry 3 -o "$TMP/$CHECKSUM" "$RELEASE_BASE/$CHECKSUM"
   else
-    wget -O "$BIN_DIR/$BIN_NAME" "$BIN_URL"
+    wget -O "$TMP/$TARBALL"  "$RELEASE_BASE/$TARBALL"
+    wget -O "$TMP/$CHECKSUM" "$RELEASE_BASE/$CHECKSUM"
   fi
+
+  echo "==> Verifying SHA256"
+  ( cd "$TMP" && sha256sum -c "$CHECKSUM" )
+
+  echo "==> Extracting $BIN_NAME into $BIN_DIR"
+  tar -xzf "$TMP/$TARBALL" -C "$BIN_DIR"
   chmod +x "$BIN_DIR/$BIN_NAME"
 fi
 

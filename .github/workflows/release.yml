@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-linux-x86_64:
+    name: Build Linux x86_64 (glibc 2.35)
+    # Pinned to ubuntu-22.04 deliberately: Sentinel runs Ubuntu 22.04 with
+    # glibc 2.35. ubuntu-latest (currently 24.04) ships glibc 2.39 and
+    # produces binaries that won't load on the validator.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --locked --bin x1cd
+
+      - name: Strip binary
+        run: strip target/release/x1cd
+
+      - name: Package tarball
+        run: tar -czf x1cd-linux-x86_64.tar.gz -C target/release x1cd
+
+      - name: Compute SHA256 checksum
+        run: sha256sum x1cd-linux-x86_64.tar.gz > x1cd-linux-x86_64.tar.gz.sha256
+
+      - name: Verify checksum (smoke test before upload)
+        run: sha256sum -c x1cd-linux-x86_64.tar.gz.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            x1cd-linux-x86_64.tar.gz
+            x1cd-linux-x86_64.tar.gz.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## Linux x86_64 (glibc 2.35+)
+
+            Built on Ubuntu 22.04 — runs on Ubuntu 22.04 (Sentinel) and any
+            distribution shipping glibc 2.35 or newer.
+
+            ### Manual install
+
+            ```bash
+            curl -fLO https://github.com/PioWin-clo/X1-ClockDrift/releases/download/${{ github.ref_name }}/x1cd-linux-x86_64.tar.gz
+            curl -fLO https://github.com/PioWin-clo/X1-ClockDrift/releases/download/${{ github.ref_name }}/x1cd-linux-x86_64.tar.gz.sha256
+            sha256sum -c x1cd-linux-x86_64.tar.gz.sha256
+            tar -xzf x1cd-linux-x86_64.tar.gz
+            ```
+
+            ### Automated install on a validator
+
+            See [install/install.sh](https://github.com/PioWin-clo/X1-ClockDrift/blob/main/install/install.sh)
+            — downloads the tarball, verifies SHA256, drops the binary into
+            `/home/x1pio/strontium-meter/bin/`, and wires up the systemd unit.
