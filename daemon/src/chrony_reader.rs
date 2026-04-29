@@ -254,6 +254,15 @@ async fn poll_once(pool: &Pool) -> Result<()> {
     let tracking_line = tracking_str.lines().next().unwrap_or("").trim();
     let now = chrono::Utc::now().timestamp();
     if let Some(parsed) = parse_tracking_csv(tracking_line) {
+        // Accumulate into the current 5-minute history bucket so the
+        // history chart can show Sentinel offset alongside chain drift.
+        let bucket_ts = (now / 300) * 300;
+        let sys_us = parsed.system_offset_seconds * 1_000_000.0;
+        let rms_us = parsed.rms_offset_seconds * 1_000_000.0;
+        if let Err(e) = db::accumulate_chrony_history(pool, bucket_ts, sys_us, rms_us).await {
+            tracing::warn!(error = %e, bucket_ts, "accumulate_chrony_history failed");
+        }
+
         let tracking = ChronyTracking {
             updated_at: now,
             reference_id: Some(parsed.reference_id),

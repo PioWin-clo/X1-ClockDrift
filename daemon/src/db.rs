@@ -25,6 +25,21 @@ pub struct ValidatorSummary {
     pub last_seen_slot: i64,
     pub last_stake_lamports: i64,
     pub updated_at: i64,
+    pub cluster_id: Option<i64>,
+    pub cluster_size: i64,
+    pub is_multi_node: bool,
+}
+
+/// One cluster row produced by the cluster-detection query.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ClusterRow {
+    pub cluster_id: i64,
+    pub cluster_size: i64,
+    pub members: Vec<String>,
+    pub r_mean: i64,
+    pub r_stddev: i64,
+    pub r_p10: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -111,8 +126,12 @@ CREATE TABLE IF NOT EXISTS validator_drift_summary (
     p90_drift_ms REAL NOT NULL,
     last_seen_slot INTEGER NOT NULL,
     last_stake_lamports INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    cluster_id INTEGER,
+    cluster_size INTEGER DEFAULT 1,
+    is_multi_node INTEGER DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_drift_summary_cluster ON validator_drift_summary(cluster_id);
 
 CREATE TABLE IF NOT EXISTS network_drift_history (
     bucket_ts INTEGER PRIMARY KEY,
@@ -166,6 +185,14 @@ CREATE TABLE IF NOT EXISTS chrony_sources (
     last_sample_error_seconds REAL,
     updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS chrony_tracking_history (
+    bucket_ts INTEGER PRIMARY KEY,
+    avg_system_offset_us REAL NOT NULL,
+    avg_rms_offset_us REAL NOT NULL,
+    sample_count INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 "#;
 
 pub async fn init(path: &str) -> Result<Pool> {
@@ -192,7 +219,46 @@ pub async fn init(path: &str) -> Result<Pool> {
             sqlx::query(s).execute(&pool).await?;
         }
     }
+    migrate_v3(&pool).await?;
     Ok(pool)
+}
+
+/// One-time idempotent migration to add v0.3.0 columns to
+/// `validator_drift_summary` on databases that already exist from earlier
+/// releases. SQLite has no `ADD COLUMN IF NOT EXISTS`, so we probe via
+/// `PRAGMA table_info` first. New `CREATE TABLE` statements in SCHEMA are
+/// already idempotent.
+async fn migrate_v3(pool: &Pool) -> Result<()> {
+    let rows = sqlx::query("PRAGMA table_info(validator_drift_summary)")
+        .fetch_all(pool)
+        .await?;
+    let cols: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("name").unwrap_or_default())
+        .collect();
+
+    if !cols.iter().any(|c| c == "cluster_id") {
+        sqlx::query("ALTER TABLE validator_drift_summary ADD COLUMN cluster_id INTEGER")
+            .execute(pool)
+            .await?;
+        tracing::info!("migrate_v3: added cluster_id");
+    }
+    if !cols.iter().any(|c| c == "cluster_size") {
+        sqlx::query("ALTER TABLE validator_drift_summary ADD COLUMN cluster_size INTEGER DEFAULT 1")
+            .execute(pool)
+            .await?;
+        tracing::info!("migrate_v3: added cluster_size");
+    }
+    if !cols.iter().any(|c| c == "is_multi_node") {
+        sqlx::query("ALTER TABLE validator_drift_summary ADD COLUMN is_multi_node INTEGER DEFAULT 0")
+            .execute(pool)
+            .await?;
+        tracing::info!("migrate_v3: added is_multi_node");
+    }
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_drift_summary_cluster ON validator_drift_summary(cluster_id)")
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn record_slot_obs(pool: &Pool, slot: u64, ts_local_us: i64) -> Result<()> {
@@ -412,7 +478,77 @@ pub async fn recompute_validator_summaries(pool: &Pool) -> Result<usize> {
         written += 1;
     }
     tx.commit().await?;
+
+    // Phase 2 (v0.3.0): detect operator clusters from drift signature.
+    // Singletons keep cluster_id NULL, cluster_size 1, is_multi_node 0
+    // — those are the schema defaults set by the INSERT above.
+    if let Err(e) = detect_and_assign_clusters(pool).await {
+        tracing::warn!(error = %e, "cluster detection failed");
+    }
+
     Ok(written)
+}
+
+/// Detect operator clusters by drift signature: validators that share
+/// `(round(mean), round(stddev), round(p10))` with at least 3 members are
+/// flagged as `is_multi_node = 1`, given the same `cluster_size` and a
+/// 1-indexed `cluster_id` ordered by descending size.
+///
+/// Idempotent — safe to call repeatedly. Resets all cluster columns to
+/// defaults first so removed members get re-classified as singletons.
+pub async fn detect_and_assign_clusters(pool: &Pool) -> Result<()> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query(
+        "UPDATE validator_drift_summary \
+         SET cluster_id = NULL, cluster_size = 1, is_multi_node = 0",
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // Note: alias `group_size` (not `cluster_size`) — the table itself has
+    // a `cluster_size` column, and SQLite would resolve `HAVING cluster_size`
+    // against that column (always 1 from the UPDATE above) instead of the
+    // COUNT aggregate, silently producing zero clusters.
+    let rows = sqlx::query(
+        "SELECT \
+            CAST(round(mean_drift_ms) AS INTEGER) AS r_mean, \
+            CAST(round(stddev_drift_ms) AS INTEGER) AS r_stddev, \
+            CAST(round(p10_drift_ms) AS INTEGER) AS r_p10, \
+            COUNT(*) AS group_size, \
+            GROUP_CONCAT(validator) AS members \
+         FROM validator_drift_summary \
+         WHERE n_samples >= 5 \
+         GROUP BY r_mean, r_stddev, r_p10 \
+         HAVING group_size >= 3 \
+         ORDER BY group_size DESC, r_mean ASC",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    for (idx, r) in rows.iter().enumerate() {
+        let cluster_id = (idx as i64) + 1;
+        let cluster_size: i64 = r.try_get("group_size")?;
+        let members: String = r.try_get("members")?;
+        for member in members.split(',') {
+            let m = member.trim();
+            if m.is_empty() {
+                continue;
+            }
+            sqlx::query(
+                "UPDATE validator_drift_summary \
+                 SET cluster_id = ?1, cluster_size = ?2, is_multi_node = 1 \
+                 WHERE validator = ?3",
+            )
+            .bind(cluster_id)
+            .bind(cluster_size)
+            .bind(m)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 pub async fn recompute_network_history_bucket(pool: &Pool, bucket_ts: i64) -> Result<()> {
@@ -497,7 +633,8 @@ pub async fn recompute_network_history_bucket(pool: &Pool, bucket_ts: i64) -> Re
 pub async fn fetch_validator_summaries(pool: &Pool) -> Result<Vec<ValidatorSummary>> {
     let rows = sqlx::query(
         "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
-                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at \
+                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                cluster_id, cluster_size, is_multi_node \
          FROM validator_drift_summary",
     )
     .fetch_all(pool)
@@ -516,9 +653,48 @@ pub async fn fetch_validator_summaries(pool: &Pool) -> Result<Vec<ValidatorSumma
             last_seen_slot: r.try_get("last_seen_slot")?,
             last_stake_lamports: r.try_get("last_stake_lamports")?,
             updated_at: r.try_get("updated_at")?,
+            cluster_id: r.try_get::<Option<i64>, _>("cluster_id").unwrap_or(None),
+            cluster_size: r.try_get("cluster_size").unwrap_or(1),
+            is_multi_node: r.try_get::<i64, _>("is_multi_node").unwrap_or(0) != 0,
         });
     }
     Ok(out)
+}
+
+/// Aggregate cluster summary stats for the dashboard.
+/// Returns: (n_clusters, n_in_clusters, n_singletons, largest_size, largest_total_stake_lamports).
+pub async fn fetch_cluster_summary(pool: &Pool) -> Result<(i64, i64, i64, i64, i64)> {
+    let row = sqlx::query(
+        "SELECT \
+            (SELECT COUNT(DISTINCT cluster_id) FROM validator_drift_summary WHERE cluster_id IS NOT NULL) AS n_clusters, \
+            (SELECT COUNT(*) FROM validator_drift_summary WHERE is_multi_node = 1) AS n_in, \
+            (SELECT COUNT(*) FROM validator_drift_summary WHERE is_multi_node = 0) AS n_singletons",
+    )
+    .fetch_one(pool)
+    .await?;
+    let n_clusters: i64 = row.try_get("n_clusters").unwrap_or(0);
+    let n_in: i64 = row.try_get("n_in").unwrap_or(0);
+    let n_singletons: i64 = row.try_get("n_singletons").unwrap_or(0);
+
+    let largest = sqlx::query(
+        "SELECT cluster_id, cluster_size, SUM(last_stake_lamports) AS total_stake \
+         FROM validator_drift_summary \
+         WHERE cluster_id IS NOT NULL \
+         GROUP BY cluster_id \
+         ORDER BY cluster_size DESC, total_stake DESC \
+         LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    let (largest_size, largest_stake) = match largest {
+        Some(r) => (
+            r.try_get::<i64, _>("cluster_size").unwrap_or(0),
+            r.try_get::<i64, _>("total_stake").unwrap_or(0),
+        ),
+        None => (0, 0),
+    };
+    Ok((n_clusters, n_in, n_singletons, largest_size, largest_stake))
 }
 
 pub async fn fetch_network_history(pool: &Pool, since_ts: i64) -> Result<Vec<NetworkBucket>> {
@@ -706,7 +882,8 @@ pub async fn get_best_synced_validators(
 ) -> Result<Vec<ValidatorSummary>> {
     let rows = sqlx::query(
         "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
-                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at \
+                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                cluster_id, cluster_size, is_multi_node \
          FROM validator_drift_summary \
          WHERE n_samples >= ?1 \
          ORDER BY ABS(mean_drift_ms) ASC \
@@ -730,7 +907,93 @@ pub async fn get_best_synced_validators(
             last_seen_slot: r.try_get("last_seen_slot")?,
             last_stake_lamports: r.try_get("last_stake_lamports")?,
             updated_at: r.try_get("updated_at")?,
+            cluster_id: r.try_get::<Option<i64>, _>("cluster_id").unwrap_or(None),
+            cluster_size: r.try_get("cluster_size").unwrap_or(1),
+            is_multi_node: r.try_get::<i64, _>("is_multi_node").unwrap_or(0) != 0,
         });
+    }
+    Ok(out)
+}
+
+/// Running-mean accumulator for `chrony_tracking_history`.
+/// Each successful chrony poll feeds (system_offset_us, rms_offset_us)
+/// into the current 5-minute bucket.
+pub async fn accumulate_chrony_history(
+    pool: &Pool,
+    bucket_ts: i64,
+    system_offset_us: f64,
+    rms_offset_us: f64,
+) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "INSERT INTO chrony_tracking_history \
+         (bucket_ts, avg_system_offset_us, avg_rms_offset_us, sample_count, updated_at) \
+         VALUES (?1, ?2, ?3, 1, ?4) \
+         ON CONFLICT(bucket_ts) DO UPDATE SET \
+             avg_system_offset_us = (avg_system_offset_us * sample_count + ?2) / (sample_count + 1), \
+             avg_rms_offset_us    = (avg_rms_offset_us    * sample_count + ?3) / (sample_count + 1), \
+             sample_count = sample_count + 1, \
+             updated_at = ?4",
+    )
+    .bind(bucket_ts)
+    .bind(system_offset_us)
+    .bind(rms_offset_us)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Per-bucket map for the history chart's third dataset.
+pub async fn fetch_chrony_history_map(
+    pool: &Pool,
+    since_ts: i64,
+) -> Result<std::collections::HashMap<i64, f64>> {
+    let rows = sqlx::query(
+        "SELECT bucket_ts, avg_system_offset_us \
+         FROM chrony_tracking_history \
+         WHERE bucket_ts >= ?1",
+    )
+    .bind(since_ts)
+    .fetch_all(pool)
+    .await?;
+    let mut map = std::collections::HashMap::with_capacity(rows.len());
+    for r in rows {
+        let ts: i64 = r.try_get("bucket_ts")?;
+        let v: f64 = r.try_get("avg_system_offset_us")?;
+        map.insert(ts, v);
+    }
+    Ok(map)
+}
+
+/// All raw `(slot_obs.ts_local_us, drift_ms)` samples for a single validator
+/// in the last `lookback_secs` seconds. Caller buckets / aggregates as needed.
+pub async fn get_validator_history(
+    pool: &Pool,
+    validator: &str,
+    lookback_secs: u64,
+) -> Result<Vec<(i64, f64)>> {
+    let cutoff_us =
+        (chrono::Utc::now().timestamp() - lookback_secs as i64) * 1_000_000;
+    let rows = sqlx::query(
+        "SELECT s.ts_local_us AS ts_local_us, \
+                (CAST(v.ts_chain AS REAL) * 1000.0) - (CAST(s.ts_local_us AS REAL) / 1000.0) AS drift_ms \
+         FROM vote_records v \
+         JOIN slot_obs s ON s.slot = v.slot \
+         WHERE v.validator = ?1 AND s.ts_local_us >= ?2 \
+         ORDER BY s.ts_local_us ASC",
+    )
+    .bind(validator)
+    .bind(cutoff_us)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        out.push((
+            r.try_get::<i64, _>("ts_local_us")?,
+            r.try_get::<f64, _>("drift_ms")?,
+        ));
     }
     Ok(out)
 }
@@ -773,6 +1036,10 @@ pub async fn cleanup_old(pool: &Pool, retention_days: u32, history_retention_day
         .execute(&mut *tx)
         .await?;
     sqlx::query("DELETE FROM network_drift_history WHERE bucket_ts < ?1")
+        .bind(cutoff_history)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM chrony_tracking_history WHERE bucket_ts < ?1")
         .bind(cutoff_history)
         .execute(&mut *tx)
         .await?;
@@ -905,6 +1172,131 @@ mod tests {
         assert_eq!(summaries[0].validator, "VAL1");
         assert_eq!(summaries[0].n_samples, 2);
         assert_eq!(summaries[0].last_stake_lamports, 5_000_000_000);
+    }
+
+    /// Cluster detection: 3 validators sharing rounded (mean, stddev, p10)
+    /// signature get one cluster_id; isolated validators stay singletons.
+    #[tokio::test]
+    async fn detect_clusters_groups_three_or_more() {
+        let pool = init(":memory:").await.unwrap();
+        let now = chrono::Utc::now().timestamp();
+        let rows = [
+            // Cluster A — 3 members at (-883, 298, -1151).
+            // Avoid p10 == ±0.5 increments (SQLite ROUND uses banker's
+            // rounding so e.g. -1150.5 -> -1150, splitting the group).
+            ("A1", 50i64, -883.4, 298.2, -1150.8),
+            ("A2", 50, -883.1, 297.9, -1151.2),
+            ("A3", 50, -882.7, 298.4, -1150.7),
+            // Cluster B — 4 members at (10, 5, 5)
+            ("B1", 50, 10.0, 5.0, 5.0),
+            ("B2", 50, 10.1, 5.1, 5.0),
+            ("B3", 50, 9.9, 4.9, 5.0),
+            ("B4", 50, 10.2, 5.0, 5.0),
+            // Singletons
+            ("S1", 50, 100.0, 50.0, 50.0),
+            ("S2", 50, -42.0, 10.0, -52.0),
+            // Pair (size=2) — should NOT be a cluster
+            ("P1", 50, 200.0, 30.0, 170.0),
+            ("P2", 50, 200.1, 30.0, 170.0),
+        ];
+        for (v, n, m, sd, p10) in rows.iter() {
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
+                 VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?5, 0, 0, ?6)",
+            )
+            .bind(*v)
+            .bind(*n)
+            .bind(*m)
+            .bind(*sd)
+            .bind(*p10)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        detect_and_assign_clusters(&pool).await.unwrap();
+        let summaries = fetch_validator_summaries(&pool).await.unwrap();
+        let by_v: std::collections::HashMap<&str, &ValidatorSummary> =
+            summaries.iter().map(|s| (s.validator.as_str(), s)).collect();
+
+        // Cluster B (size 4) should be cluster_id=1 (largest); cluster A is 2.
+        let b1 = by_v["B1"];
+        assert_eq!(b1.cluster_size, 4);
+        assert!(b1.is_multi_node);
+        assert_eq!(b1.cluster_id, Some(1));
+        for v in &["B1", "B2", "B3", "B4"] {
+            assert_eq!(by_v[v].cluster_id, Some(1));
+        }
+
+        let a1 = by_v["A1"];
+        assert_eq!(a1.cluster_size, 3);
+        assert!(a1.is_multi_node);
+        assert_eq!(a1.cluster_id, Some(2));
+        for v in &["A1", "A2", "A3"] {
+            assert_eq!(by_v[v].cluster_id, Some(2));
+        }
+
+        // Singletons + size-2 pair are NOT in clusters.
+        for v in &["S1", "S2", "P1", "P2"] {
+            let row = by_v[v];
+            assert_eq!(row.cluster_id, None, "{v} should be singleton");
+            assert!(!row.is_multi_node);
+            assert_eq!(row.cluster_size, 1);
+        }
+    }
+
+    /// `accumulate_chrony_history` running mean: two samples in the same
+    /// bucket should average correctly.
+    #[tokio::test]
+    async fn chrony_running_mean() {
+        let pool = init(":memory:").await.unwrap();
+        let bucket = 1_777_400_000i64;
+        accumulate_chrony_history(&pool, bucket, 100.0, 10.0).await.unwrap();
+        accumulate_chrony_history(&pool, bucket, 200.0, 30.0).await.unwrap();
+        accumulate_chrony_history(&pool, bucket, 300.0, 50.0).await.unwrap();
+
+        let map = fetch_chrony_history_map(&pool, 0).await.unwrap();
+        let avg = *map.get(&bucket).unwrap();
+        assert!((avg - 200.0).abs() < 1e-9, "expected 200, got {avg}");
+
+        let row = sqlx::query("SELECT sample_count, avg_rms_offset_us FROM chrony_tracking_history WHERE bucket_ts = ?1")
+            .bind(bucket)
+            .fetch_one(&pool).await.unwrap();
+        let count: i64 = row.try_get("sample_count").unwrap();
+        let avg_rms: f64 = row.try_get("avg_rms_offset_us").unwrap();
+        assert_eq!(count, 3);
+        assert!((avg_rms - 30.0).abs() < 1e-9, "expected 30, got {avg_rms}");
+    }
+
+    /// `get_validator_history` returns drift samples joined with slot_obs.
+    #[tokio::test]
+    async fn validator_history_join_works() {
+        let pool = init(":memory:").await.unwrap();
+        let now_us = chrono::Utc::now().timestamp_micros();
+        let now_s = now_us / 1_000_000;
+
+        record_slot_obs(&pool, 100, now_us - 2_000_000).await.unwrap();
+        record_slot_obs(&pool, 101, now_us - 1_000_000).await.unwrap();
+        record_slot_obs(&pool, 102, now_us).await.unwrap();
+        let votes = vec![
+            VoteRecord { validator: "TARGET".into(), slot_voted: 100, ts_chain: now_s - 2 },
+            VoteRecord { validator: "TARGET".into(), slot_voted: 101, ts_chain: now_s - 1 },
+            VoteRecord { validator: "OTHER".into(),  slot_voted: 102, ts_chain: now_s },
+        ];
+        record_votes(&pool, &votes, 200).await.unwrap();
+
+        let target_history = get_validator_history(&pool, "TARGET", 24 * 3600).await.unwrap();
+        assert_eq!(target_history.len(), 2, "TARGET should have 2 samples");
+        assert!(target_history[0].0 < target_history[1].0, "should be ASC by ts");
+
+        let other_history = get_validator_history(&pool, "OTHER", 24 * 3600).await.unwrap();
+        assert_eq!(other_history.len(), 1);
+
+        let ghost = get_validator_history(&pool, "GHOST", 24 * 3600).await.unwrap();
+        assert!(ghost.is_empty());
     }
 
     /// Insert synthetic validator_drift_summary rows and verify

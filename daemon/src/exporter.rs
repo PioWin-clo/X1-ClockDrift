@@ -84,6 +84,11 @@ struct SummaryJson {
     validators_with_drift_over_5s: i64,
     latest_slot: Option<i64>,
     earliest_slot_24h: Option<i64>,
+    n_clusters_detected: i64,
+    n_validators_in_clusters: i64,
+    n_singletons: i64,
+    largest_cluster_size: i64,
+    largest_cluster_total_stake_xnt: f64,
 }
 
 #[derive(Serialize)]
@@ -99,6 +104,9 @@ struct ValidatorJson {
     stake_lamports: i64,
     stake_xnt: f64,
     weighted_impact_ms_xnt: f64,
+    cluster_id: Option<i64>,
+    cluster_size: i64,
+    is_multi_node: bool,
 }
 
 #[derive(Serialize)]
@@ -108,6 +116,7 @@ struct HistoryEntryJson {
     median_drift_ms: f64,
     mean_drift_ms: f64,
     stake_weighted_drift_ms: f64,
+    sentinel_offset_us: Option<f64>,
     n_validators: i64,
     n_samples: i64,
 }
@@ -134,6 +143,22 @@ struct BestValidatorJson {
     p90_drift_ms: f64,
     stake_lamports: i64,
     stake_xnt: f64,
+    cluster_id: Option<i64>,
+    cluster_size: i64,
+    is_multi_node: bool,
+}
+
+#[derive(Serialize)]
+struct ValidatorHistoryBucket {
+    ts: i64,
+    drift_ms: f64,
+}
+
+#[derive(Serialize)]
+struct ValidatorHistoryJson {
+    vote_account: String,
+    lookback_days: u64,
+    buckets: Vec<ValidatorHistoryBucket>,
 }
 
 #[derive(Serialize)]
@@ -211,6 +236,10 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
     let latest = db::latest_slot(pool).await?;
     let earliest = db::earliest_slot_since(pool, cutoff_us).await?;
 
+    let (n_clusters, n_in_clusters, n_singletons, largest_size, largest_stake_lamports) =
+        db::fetch_cluster_summary(pool).await.unwrap_or((0, 0, 0, 0, 0));
+    let largest_stake_xnt = largest_stake_lamports as f64 / LAMPORTS_PER_XNT;
+
     let summary = SummaryJson {
         generated_at_utc: format_iso(now_secs),
         n_validators_observed: summaries.len() as i64,
@@ -222,6 +251,11 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         validators_with_drift_over_5s: drift_over_5s,
         latest_slot: latest,
         earliest_slot_24h: earliest,
+        n_clusters_detected: n_clusters,
+        n_validators_in_clusters: n_in_clusters,
+        n_singletons,
+        largest_cluster_size: largest_size,
+        largest_cluster_total_stake_xnt: largest_stake_xnt,
     };
 
     let mut sorted = summaries.clone();
@@ -250,12 +284,18 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
                 stake_lamports: s.last_stake_lamports,
                 stake_xnt,
                 weighted_impact_ms_xnt,
+                cluster_id: s.cluster_id,
+                cluster_size: s.cluster_size,
+                is_multi_node: s.is_multi_node,
             }
         })
         .collect();
 
     let history_since = now_secs - 7 * 86400;
     let history = db::fetch_network_history(pool, history_since).await?;
+    let chrony_history_map = db::fetch_chrony_history_map(pool, history_since)
+        .await
+        .unwrap_or_default();
     let history_json: Vec<HistoryEntryJson> = history
         .into_iter()
         .map(|h| HistoryEntryJson {
@@ -264,6 +304,7 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
             median_drift_ms: h.median_drift_ms,
             mean_drift_ms: h.mean_drift_ms,
             stake_weighted_drift_ms: h.stake_weighted_drift_ms,
+            sentinel_offset_us: chrony_history_map.get(&h.bucket_ts).copied(),
             n_validators: h.n_validators,
             n_samples: h.n_samples,
         })
@@ -301,11 +342,30 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
                 p90_drift_ms: s.p90_drift_ms,
                 stake_lamports: s.last_stake_lamports,
                 stake_xnt,
+                cluster_id: s.cluster_id,
+                cluster_size: s.cluster_size,
+                is_multi_node: s.is_multi_node,
             }
         })
         .collect();
 
     let chrony_json = build_chrony_json(pool, now_secs).await;
+
+    // Per-validator histories: top 500 by impact + top 10 best-synced.
+    let mut top_validators: Vec<String> =
+        validators_json.iter().map(|v| v.pubkey.clone()).collect();
+    for b in &best_json {
+        if !top_validators.contains(&b.vote_account) {
+            top_validators.push(b.vote_account.clone());
+        }
+    }
+    let n_histories = match export_validator_histories(pool, &data_dir, &top_validators).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!(error = %e, "export_validator_histories failed");
+            0
+        }
+    };
 
     write_atomic(&data_dir.join("summary.json"), &summary).await?;
     write_atomic(&data_dir.join("validators.json"), &validators_json).await?;
@@ -319,9 +379,84 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         n_samples_24h = summary.n_samples_24h,
         n_best = best_json.len(),
         chrony_sources = chrony_json.sources.len(),
+        n_clusters = summary.n_clusters_detected,
+        n_histories,
         "wrote JSON exports"
     );
     Ok(())
+}
+
+const VALIDATOR_HISTORY_LOOKBACK_SECS: u64 = 7 * 86400;
+
+/// Bucket raw `(ts_us, drift_ms)` samples into 5-minute medians, sorted ASC.
+fn bucket_into_5min(history: &[(i64, f64)]) -> Vec<ValidatorHistoryBucket> {
+    let mut by_bucket: std::collections::HashMap<i64, Vec<f64>> =
+        std::collections::HashMap::new();
+    for (ts_us, drift) in history {
+        let bucket = (ts_us / 1_000_000 / 300) * 300;
+        by_bucket.entry(bucket).or_default().push(*drift);
+    }
+    let mut out: Vec<ValidatorHistoryBucket> = by_bucket
+        .into_iter()
+        .map(|(ts, mut drifts)| {
+            drifts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let median = drifts[drifts.len() / 2];
+            ValidatorHistoryBucket { ts, drift_ms: median }
+        })
+        .collect();
+    out.sort_by_key(|b| b.ts);
+    out
+}
+
+/// Write `data/validators/{pubkey}.json` for every pubkey in `top_validators`,
+/// then prune any leftover files from previous cycles whose pubkey is no
+/// longer in the top set. Each file contains 7 days of 5-minute median drift.
+async fn export_validator_histories(
+    pool: &Pool,
+    data_dir: &Path,
+    top_validators: &[String],
+) -> Result<usize> {
+    let dir = data_dir.join("validators");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .with_context(|| format!("creating {}", dir.display()))?;
+
+    // Cleanup: remove .json files whose stem isn't in top_validators.
+    let included: std::collections::HashSet<&String> = top_validators.iter().collect();
+    let mut entries = tokio::fs::read_dir(&dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if let Some(stem) = name.strip_suffix(".json") {
+                if !included.contains(&stem.to_string()) {
+                    let _ = tokio::fs::remove_file(&path).await;
+                }
+            }
+        }
+    }
+
+    let mut written = 0usize;
+    for pubkey in top_validators {
+        let history = match db::get_validator_history(pool, pubkey, VALIDATOR_HISTORY_LOOKBACK_SECS).await {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!(error = %e, validator = %pubkey, "get_validator_history failed");
+                continue;
+            }
+        };
+        if history.is_empty() {
+            continue;
+        }
+        let buckets = bucket_into_5min(&history);
+        let json = ValidatorHistoryJson {
+            vote_account: pubkey.clone(),
+            lookback_days: VALIDATOR_HISTORY_LOOKBACK_SECS / 86400,
+            buckets,
+        };
+        write_atomic(&dir.join(format!("{pubkey}.json")), &json).await?;
+        written += 1;
+    }
+    Ok(written)
 }
 
 fn seconds_to_us(s: f64) -> i64 {

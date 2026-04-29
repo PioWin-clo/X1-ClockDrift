@@ -94,6 +94,29 @@ if [ -d "$(dirname "$0")/../frontend" ]; then
   cp "$(dirname "$0")/../frontend/"*.html "$REPO_DIR/" || true
   cp "$(dirname "$0")/../frontend/"*.css "$REPO_DIR/" || true
   cp "$(dirname "$0")/../frontend/"*.js "$REPO_DIR/" || true
+else
+  # Standalone install (e.g., wget install.sh). Pull frontend from main
+  # branch via the deploy key and stage it on the data branch so Pages
+  # serves the latest UI without manual operator intervention.
+  echo "==> Standalone install: pulling frontend from main branch via deploy key"
+  (
+    cd "$REPO_DIR"
+    GIT_SSH_COMMAND="ssh -i $KEY_PATH -o StrictHostKeyChecking=accept-new" \
+      git fetch origin main
+    git checkout origin/main -- frontend/
+    cp -f frontend/index.html "$FRONTEND_DIR/"
+    cp -f frontend/style.css  "$FRONTEND_DIR/"
+    cp -f frontend/app.js     "$FRONTEND_DIR/"
+    cp -f frontend/index.html .
+    cp -f frontend/style.css  .
+    cp -f frontend/app.js     .
+    git add index.html style.css app.js frontend/ 2>/dev/null || true
+    if ! git diff --cached --quiet; then
+      git commit -m "Bootstrap frontend assets from main"
+      GIT_SSH_COMMAND="ssh -i $KEY_PATH -o StrictHostKeyChecking=accept-new" \
+        git push origin data || true
+    fi
+  )
 fi
 
 echo "==> Writing config.toml"

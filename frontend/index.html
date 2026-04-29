@@ -13,9 +13,16 @@
     <span class="brand-name">ClockDrift</span>
   </div>
   <div class="tagline" data-i18n-html="tagline">Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.</div>
-  <div class="lang-toggle" role="group" aria-label="Language">
-    <button id="btn-lang-en" class="lang-btn" type="button">🇬🇧 EN</button>
-    <button id="btn-lang-pl" class="lang-btn" type="button">🇵🇱 PL</button>
+  <div class="header-controls">
+    <label class="filter-toggle">
+      <input type="checkbox" id="hide-farms" checked>
+      <span data-i18n="hide_farms">Hide farms</span>
+      <span class="toggle-info" id="farm-info">(0)</span>
+    </label>
+    <div class="lang-toggle" role="group" aria-label="Language">
+      <button id="btn-lang-en" class="lang-btn" type="button">🇬🇧 EN</button>
+      <button id="btn-lang-pl" class="lang-btn" type="button">🇵🇱 PL</button>
+    </div>
   </div>
   <div class="updated">
     <span data-i18n="updated">updated</span>&nbsp;<span id="updated-ts">…</span>
@@ -81,6 +88,26 @@
     </div>
   </section>
 
+  <section class="clusters-section">
+    <div class="section-title" data-i18n="clusters_section_title">Operator clusters (identical drift signature)</div>
+    <div class="section-help" data-i18n="clusters_help">Validators sharing rounded (mean, stddev, p10) drift values with at least 3 members are flagged as multi-node operators.</div>
+    <div class="clusters-row">
+      <div class="cluster-stat">
+        <span class="cluster-label" data-i18n="clusters_detected">Detected clusters</span>
+        <span class="cluster-value" id="n-clusters">—</span>
+      </div>
+      <div class="cluster-stat">
+        <span class="cluster-label" data-i18n="cluster_validators">Validators in clusters</span>
+        <span class="cluster-value" id="n-clustered">—</span>
+        <span class="cluster-pct" id="n-clustered-pct"></span>
+      </div>
+      <div class="cluster-stat">
+        <span class="cluster-label" data-i18n="largest_cluster">Largest cluster</span>
+        <span class="cluster-value" id="largest-cluster">—</span>
+      </div>
+    </div>
+  </section>
+
   <section class="chart-block">
     <div class="chart-title" data-i18n="chart_history_title">Network drift over time (last 7 days, 5-minute buckets)</div>
     <div class="chart-frame">
@@ -92,6 +119,21 @@
     <div class="chart-title" data-i18n="chart_histogram_title">Validator drift distribution (mean drift, top 500)</div>
     <div class="chart-frame">
       <canvas id="chart-histogram"></canvas>
+    </div>
+  </section>
+
+  <section class="scatter-section">
+    <div class="section-title" data-i18n="scatter_title">Stake vs drift correlation</div>
+    <div class="section-help" data-i18n="scatter_help">Each point is a validator. X-axis = stake (log scale). Y-axis = mean drift (ms). Cluster members share colour. Click a point for details.</div>
+    <div class="chart-frame">
+      <canvas id="chart-scatter"></canvas>
+    </div>
+    <div class="scatter-stats">
+      <span data-i18n="scatter_correlation">Correlation</span>:
+      <span id="scatter-r" class="mono">—</span>
+      &nbsp;·&nbsp;
+      <span data-i18n="scatter_slope">Slope</span>:
+      <span id="scatter-slope" class="mono">—</span>
     </div>
   </section>
 
@@ -110,6 +152,7 @@
             <th class="num" data-i18n="col_stddev">stddev (ms)</th>
             <th class="num" data-i18n="col_n">n</th>
             <th class="num" data-i18n="col_stake">stake (XNT)</th>
+            <th data-i18n="col_cluster">cluster</th>
           </tr>
         </thead>
         <tbody id="best-synced-body"></tbody>
@@ -136,6 +179,7 @@
             <th data-sort="n_samples" class="num" data-i18n="col_n">n</th>
             <th data-sort="stake_xnt" class="num" data-i18n="col_stake">stake (XNT)</th>
             <th data-sort="weighted_impact_ms_xnt" class="num" data-i18n="col_impact">impact</th>
+            <th data-sort="cluster_size" data-i18n="col_cluster">cluster</th>
           </tr>
         </thead>
         <tbody id="ranking-body"></tbody>
@@ -178,6 +222,25 @@
   </footer>
 
 </main>
+
+<div class="modal-overlay" id="validator-modal" hidden>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 class="mono" id="modal-pubkey">…</h3>
+      <button class="modal-close" id="modal-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="modal-stats" id="modal-stats"></div>
+    <div class="modal-chart-frame">
+      <canvas id="modal-chart"></canvas>
+    </div>
+    <div class="modal-empty" id="modal-empty" hidden data-i18n="modal_limited_data">
+      Detailed history is only kept for the top 500 most-impactful and top 10 best-synced validators.
+    </div>
+    <div class="modal-link">
+      <a id="modal-explorer-link" target="_blank" rel="noreferrer noopener" data-i18n="modal_view_explorer">View on X1 Explorer</a>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="app.js"></script>
