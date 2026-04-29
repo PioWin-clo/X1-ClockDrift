@@ -131,7 +131,6 @@ CREATE TABLE IF NOT EXISTS validator_drift_summary (
     cluster_size INTEGER DEFAULT 1,
     is_multi_node INTEGER DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_drift_summary_cluster ON validator_drift_summary(cluster_id);
 
 CREATE TABLE IF NOT EXISTS network_drift_history (
     bucket_ts INTEGER PRIMARY KEY,
@@ -255,6 +254,11 @@ async fn migrate_v3(pool: &Pool) -> Result<()> {
             .await?;
         tracing::info!("migrate_v3: added is_multi_node");
     }
+    // Index on cluster_id is created here, NOT in SCHEMA, because on an
+    // existing v0.2.0 database CREATE TABLE IF NOT EXISTS is a no-op and the
+    // column wouldn't exist yet — SQLite would reject the index with
+    // "no such column: cluster_id". This ordering is guarded by the
+    // migration_v2_to_v3_preserves_data integration test.
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_drift_summary_cluster ON validator_drift_summary(cluster_id)")
         .execute(pool)
         .await?;
@@ -1297,6 +1301,260 @@ mod tests {
 
         let ghost = get_validator_history(&pool, "GHOST", 24 * 3600).await.unwrap();
         assert!(ghost.is_empty());
+    }
+
+    /// Regression guard for the v0.2.0 → v0.3.0 production migration.
+    /// Builds a SQLite database with the exact v0.2.0 schema (no cluster_id
+    /// columns, no chrony_tracking_history table), inserts representative
+    /// data, then calls `init()` and asserts:
+    ///   1. `init()` succeeds (no "no such column: cluster_id" error).
+    ///   2. All pre-existing rows are preserved.
+    ///   3. New columns and tables are present after migration.
+    ///   4. Existing rows have correct default values for new columns.
+    ///
+    /// This test would have caught the v0.3.0 deployment failure on
+    /// Sentinel where `CREATE INDEX ... ON ... (cluster_id)` in SCHEMA
+    /// ran before `migrate_v3` had ALTER-added the column.
+    #[tokio::test]
+    async fn migration_v2_to_v3_preserves_data() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        let path = std::env::temp_dir().join(format!(
+            "x1cd_migration_test_{}_{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path_str = path.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&path);
+
+        // === Phase 1: build a real v0.2.0 schema (verbatim from before
+        // v0.3.0 added cluster_* columns and chrony_tracking_history).
+        const V2_SCHEMA: &str = r#"
+            CREATE TABLE slot_obs (slot INTEGER PRIMARY KEY, ts_local_us INTEGER NOT NULL);
+            CREATE INDEX idx_slot_obs_ts ON slot_obs(ts_local_us);
+
+            CREATE TABLE vote_records (
+                slot INTEGER NOT NULL,
+                block_slot INTEGER NOT NULL,
+                validator TEXT NOT NULL,
+                ts_chain INTEGER NOT NULL,
+                PRIMARY KEY (slot, validator, block_slot)
+            );
+            CREATE INDEX idx_vote_records_validator ON vote_records(validator);
+            CREATE INDEX idx_vote_records_slot ON vote_records(slot);
+
+            CREATE TABLE stake_snap (
+                snapshot_ts INTEGER NOT NULL,
+                validator TEXT NOT NULL,
+                stake_lamports INTEGER NOT NULL,
+                PRIMARY KEY (snapshot_ts, validator)
+            );
+
+            CREATE TABLE validator_drift_summary (
+                validator TEXT PRIMARY KEY,
+                n_samples INTEGER NOT NULL,
+                mean_drift_ms REAL NOT NULL,
+                median_drift_ms REAL NOT NULL,
+                stddev_drift_ms REAL NOT NULL,
+                p10_drift_ms REAL NOT NULL,
+                p90_drift_ms REAL NOT NULL,
+                last_seen_slot INTEGER NOT NULL,
+                last_stake_lamports INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE network_drift_history (
+                bucket_ts INTEGER PRIMARY KEY,
+                median_drift_ms REAL NOT NULL,
+                mean_drift_ms REAL NOT NULL,
+                stake_weighted_drift_ms REAL NOT NULL,
+                n_validators INTEGER NOT NULL,
+                n_samples INTEGER NOT NULL
+            );
+
+            CREATE TABLE error_log (
+                ts INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                message TEXT NOT NULL
+            );
+            CREATE INDEX idx_error_log_ts ON error_log(ts);
+
+            CREATE TABLE chrony_tracking (
+                id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+                updated_at INTEGER NOT NULL,
+                reference_id TEXT,
+                reference_ip TEXT,
+                stratum INTEGER,
+                ref_time_unix REAL,
+                system_offset_seconds REAL,
+                last_offset_seconds REAL,
+                rms_offset_seconds REAL,
+                frequency_ppm REAL,
+                residual_freq_ppm REAL,
+                skew_ppm REAL,
+                root_delay_seconds REAL,
+                root_dispersion_seconds REAL,
+                update_interval_seconds REAL,
+                leap_status TEXT
+            );
+
+            CREATE TABLE chrony_sources (
+                ip TEXT PRIMARY KEY,
+                hostname TEXT NOT NULL,
+                operator TEXT NOT NULL,
+                country_code TEXT,
+                country_name TEXT,
+                mode TEXT,
+                state TEXT,
+                stratum INTEGER,
+                poll_log2 INTEGER,
+                reach INTEGER,
+                last_rx_seconds INTEGER,
+                last_sample_offset_seconds REAL,
+                last_sample_original_seconds REAL,
+                last_sample_error_seconds REAL,
+                updated_at INTEGER NOT NULL
+            );
+        "#;
+
+        // Build the v0.2.0 DB on the target path, then close it before
+        // calling init() — mimics a daemon restart against an existing DB.
+        {
+            let opts = SqliteConnectOptions::from_str(&format!("sqlite://{path_str}"))
+                .unwrap()
+                .create_if_missing(true);
+            let setup_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .unwrap();
+
+            for stmt in V2_SCHEMA.split(';') {
+                let s = stmt.trim();
+                if !s.is_empty() {
+                    sqlx::query(s).execute(&setup_pool).await.unwrap();
+                }
+            }
+
+            // Representative data simulating ~24h of v0.2.0 production.
+            for slot in 100i64..110 {
+                sqlx::query("INSERT INTO slot_obs (slot, ts_local_us) VALUES (?1, ?2)")
+                    .bind(slot)
+                    .bind(1_700_000_000_000_000i64 + slot * 400_000)
+                    .execute(&setup_pool)
+                    .await
+                    .unwrap();
+            }
+            for i in 0..5i64 {
+                sqlx::query(
+                    "INSERT INTO vote_records (slot, block_slot, validator, ts_chain) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                )
+                .bind(100 + i)
+                .bind(200 + i)
+                .bind(format!("VAL{i}"))
+                .bind(1_700_000_000i64 + i)
+                .execute(&setup_pool)
+                .await
+                .unwrap();
+            }
+            for i in 0..3i64 {
+                sqlx::query(
+                    "INSERT INTO validator_drift_summary \
+                     (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                      p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
+                     VALUES (?1, 10, 100.0, 100.0, 5.0, 95.0, 105.0, 100, 1000000000, 1700000000)",
+                )
+                .bind(format!("VAL{i}"))
+                .execute(&setup_pool)
+                .await
+                .unwrap();
+            }
+            for i in 0..2i64 {
+                sqlx::query(
+                    "INSERT INTO stake_snap (snapshot_ts, validator, stake_lamports) \
+                     VALUES (1700000000, ?1, ?2)",
+                )
+                .bind(format!("VAL{i}"))
+                .bind(1_000_000_000i64 * (i + 1))
+                .execute(&setup_pool)
+                .await
+                .unwrap();
+            }
+            sqlx::query(
+                "INSERT INTO chrony_tracking (id, updated_at, leap_status) \
+                 VALUES (1, 1700000000, 'Normal')",
+            )
+            .execute(&setup_pool)
+            .await
+            .unwrap();
+
+            setup_pool.close().await;
+        }
+
+        // === Phase 2: call init() — must NOT fail. The bug we are
+        // guarding against here was: SCHEMA contained a CREATE INDEX on
+        // a v0.3.0-only column, executed before migrate_v3 had a chance
+        // to ALTER TABLE ADD it; SQLite rejected the index with
+        // "no such column: cluster_id".
+        let pool = init(&path_str).await.expect("init() must succeed on v0.2.0 schema");
+
+        // === Phase 3: original rows preserved.
+        let n_slots: i64 = sqlx::query("SELECT COUNT(*) AS n FROM slot_obs")
+            .fetch_one(&pool).await.unwrap().try_get("n").unwrap();
+        assert_eq!(n_slots, 10);
+        let n_votes: i64 = sqlx::query("SELECT COUNT(*) AS n FROM vote_records")
+            .fetch_one(&pool).await.unwrap().try_get("n").unwrap();
+        assert_eq!(n_votes, 5);
+        let n_summary: i64 = sqlx::query("SELECT COUNT(*) AS n FROM validator_drift_summary")
+            .fetch_one(&pool).await.unwrap().try_get("n").unwrap();
+        assert_eq!(n_summary, 3);
+        let n_stake: i64 = sqlx::query("SELECT COUNT(*) AS n FROM stake_snap")
+            .fetch_one(&pool).await.unwrap().try_get("n").unwrap();
+        assert_eq!(n_stake, 2);
+        let leap: String = sqlx::query("SELECT leap_status FROM chrony_tracking WHERE id = 1")
+            .fetch_one(&pool).await.unwrap().try_get("leap_status").unwrap();
+        assert_eq!(leap, "Normal");
+
+        // === Phase 4: new columns exist on validator_drift_summary.
+        let cols = sqlx::query("PRAGMA table_info(validator_drift_summary)")
+            .fetch_all(&pool).await.unwrap();
+        let names: Vec<String> = cols
+            .iter()
+            .map(|r| r.try_get::<String, _>("name").unwrap_or_default())
+            .collect();
+        for new_col in &["cluster_id", "cluster_size", "is_multi_node"] {
+            assert!(
+                names.iter().any(|c| c == *new_col),
+                "missing column after migration: {new_col}"
+            );
+        }
+
+        // === Phase 5: defaults applied to existing rows.
+        let row = sqlx::query(
+            "SELECT cluster_id, cluster_size, is_multi_node \
+             FROM validator_drift_summary WHERE validator = 'VAL0'",
+        )
+        .fetch_one(&pool).await.unwrap();
+        let cid: Option<i64> = row.try_get("cluster_id").unwrap_or(None);
+        let csize: i64 = row.try_get("cluster_size").unwrap_or(-1);
+        let imn: i64 = row.try_get("is_multi_node").unwrap_or(-1);
+        assert_eq!(cid, None, "cluster_id should be NULL on existing rows");
+        assert_eq!(csize, 1, "cluster_size should default to 1");
+        assert_eq!(imn, 0, "is_multi_node should default to 0");
+
+        // === Phase 6: new chrony_tracking_history table created and empty.
+        let n_chrony_history: i64 =
+            sqlx::query("SELECT COUNT(*) AS n FROM chrony_tracking_history")
+                .fetch_one(&pool).await.unwrap().try_get("n").unwrap();
+        assert_eq!(n_chrony_history, 0);
+
+        // Cleanup.
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
     }
 
     /// Insert synthetic validator_drift_summary rows and verify
