@@ -1,6 +1,6 @@
 [Unit]
 Description=X1 ClockDrift measurement daemon
-Documentation=https://github.com/PioWin-clo/x1-clockdrift
+Documentation=https://github.com/PioWin-clo/X1-ClockDrift
 After=network-online.target
 Wants=network-online.target
 

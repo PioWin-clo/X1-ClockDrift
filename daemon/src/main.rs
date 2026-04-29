@@ -77,11 +77,16 @@ async fn run(config_path: &std::path::Path) -> Result<()> {
             .context("building rpc client")?,
     );
 
-    let (tx_slot, rx_slot) = tokio::sync::mpsc::channel::<(u64, i64)>(1024);
-
+    // log_tail and vote_collector are decoupled in v0.1.1:
+    // each writes to the database independently. log_tail records local
+    // freeze times into slot_obs; vote_collector polls RPC on a timer for
+    // sampled blocks and records vote_records. There is no longer a
+    // shared mpsc channel between them, so a hiccup in one cannot stall
+    // the other.
     let cfg_log = cfg.log_path.clone();
+    let pool_lt = pool.clone();
     tokio::spawn(async move {
-        if let Err(e) = log_tail::run(cfg_log, tx_slot).await {
+        if let Err(e) = log_tail::run(cfg_log, pool_lt).await {
             tracing::error!(error = %e, "log_tail terminated");
         }
     });
@@ -89,7 +94,7 @@ async fn run(config_path: &std::path::Path) -> Result<()> {
     let pool_vc = pool.clone();
     let rpc_vc = rpc.clone();
     tokio::spawn(async move {
-        vote_collector::run(pool_vc, rpc_vc, rx_slot).await;
+        vote_collector::run(pool_vc, rpc_vc).await;
     });
 
     let pool_sr = pool.clone();
