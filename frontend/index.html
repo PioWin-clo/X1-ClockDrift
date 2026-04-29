@@ -12,97 +12,174 @@
     <span class="brand-mark">x1</span>
     <span class="brand-name">ClockDrift</span>
   </div>
-  <div class="tagline">Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.</div>
-  <div class="updated" id="updated">Loading…</div>
+  <div class="tagline" data-i18n-html="tagline">Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.</div>
+  <div class="lang-toggle" role="group" aria-label="Language">
+    <button id="btn-lang-en" class="lang-btn" type="button">🇬🇧 EN</button>
+    <button id="btn-lang-pl" class="lang-btn" type="button">🇵🇱 PL</button>
+  </div>
+  <div class="updated">
+    <span data-i18n="updated">updated</span>&nbsp;<span id="updated-ts">…</span>
+  </div>
 </header>
 
 <main class="container">
 
+  <section class="clock-section">
+    <div class="section-title" data-i18n="clock_section_title">My clock vs world</div>
+    <div class="clock-help" data-i18n="clock_help_text">…</div>
+    <div class="clock-grid">
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_wall">Wall clock (your browser)</div>
+        <div class="clock-cell-value mono" id="clock-wall-time">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_offset_label">Sentinel offset to UTC consensus</div>
+        <div class="clock-cell-value mono" id="clock-offset-value">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_rms_label">RMS offset</div>
+        <div class="clock-cell-value mono" id="clock-rms-value">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_stratum_label">Stratum</div>
+        <div class="clock-cell-value mono" id="clock-stratum-value">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_reference">Reference source</div>
+        <div class="clock-cell-value" id="clock-reference-value">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_skew_label">Frequency skew</div>
+        <div class="clock-cell-value mono" id="clock-skew-value">—</div>
+      </div>
+    </div>
+  </section>
+
   <section class="hero">
-    <div class="hero-label">Network drift right now</div>
+    <div class="hero-label" data-i18n="hero_label">Network drift right now</div>
     <div class="hero-value" id="hero-value">—</div>
     <div class="hero-sub" id="hero-sub">—</div>
   </section>
 
   <section class="cards">
     <div class="card">
-      <div class="card-label">Validators observed (24h)</div>
+      <div class="card-label" data-i18n="card_validators">Validators observed (24h)</div>
       <div class="card-value" id="card-validators">—</div>
     </div>
     <div class="card">
-      <div class="card-label">Samples (24h)</div>
+      <div class="card-label" data-i18n="card_samples">Samples (24h)</div>
       <div class="card-value" id="card-samples">—</div>
     </div>
     <div class="card">
-      <div class="card-label">Drift &gt; 1s</div>
+      <div class="card-label" data-i18n="card_drift1s">Drift &gt; 1s</div>
       <div class="card-value" id="card-drift1s">—</div>
       <div class="card-sub" id="card-drift1s-pct">—</div>
     </div>
     <div class="card">
-      <div class="card-label">Stake-weighted drift</div>
+      <div class="card-label" data-i18n="card_stake_drift">Stake-weighted drift</div>
       <div class="card-value" id="card-stake-drift">—</div>
     </div>
   </section>
 
   <section class="chart-block">
-    <div class="chart-title">Network drift over time (last 7 days, 5-minute buckets)</div>
+    <div class="chart-title" data-i18n="chart_history_title">Network drift over time (last 7 days, 5-minute buckets)</div>
     <div class="chart-frame">
       <canvas id="chart-history"></canvas>
     </div>
   </section>
 
   <section class="chart-block">
-    <div class="chart-title">Validator drift distribution (mean drift, top 500)</div>
+    <div class="chart-title" data-i18n="chart_histogram_title">Validator drift distribution (mean drift, top 500)</div>
     <div class="chart-frame">
       <canvas id="chart-histogram"></canvas>
     </div>
   </section>
 
+  <section class="best-synced-section">
+    <div class="best-synced-header">
+      <div class="section-title" data-i18n="best_synced_title">Best synchronized validators (top 10)</div>
+      <div class="section-help" data-i18n="best_synced_help">Validators with the smallest absolute drift from network consensus. Minimum 5 samples required.</div>
+    </div>
+    <div class="table-wrap">
+      <table class="best-synced-table">
+        <thead>
+          <tr>
+            <th data-i18n="col_rank">#</th>
+            <th data-i18n="col_pubkey">pubkey</th>
+            <th class="num" data-i18n="col_mean">mean (ms)</th>
+            <th class="num" data-i18n="col_stddev">stddev (ms)</th>
+            <th class="num" data-i18n="col_n">n</th>
+            <th class="num" data-i18n="col_stake">stake (XNT)</th>
+          </tr>
+        </thead>
+        <tbody id="best-synced-body"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="ranking-block">
     <div class="ranking-head">
-      <div class="ranking-title">Validator ranking</div>
-      <input class="search" id="search" type="search" placeholder="search by pubkey…" autocomplete="off">
+      <div class="ranking-title" data-i18n="ranking_title">Validator ranking (sorted by impact: drift × stake)</div>
+      <input class="search" id="search" type="search" data-i18n-attr-placeholder="ranking_search_placeholder" autocomplete="off">
     </div>
     <div class="table-wrap">
       <table class="ranking">
         <thead>
           <tr>
-            <th data-sort="rank">#</th>
-            <th data-sort="pubkey">pubkey</th>
-            <th data-sort="mean_drift_ms" class="num">mean (ms)</th>
-            <th data-sort="median_drift_ms" class="num">median (ms)</th>
-            <th data-sort="stddev_drift_ms" class="num">stddev (ms)</th>
-            <th data-sort="p10_drift_ms" class="num">p10 (ms)</th>
-            <th data-sort="p90_drift_ms" class="num">p90 (ms)</th>
-            <th data-sort="n_samples" class="num">n</th>
-            <th data-sort="stake_xnt" class="num">stake (XNT)</th>
-            <th data-sort="weighted_impact_ms_xnt" class="num">impact</th>
+            <th data-sort="rank" data-i18n="col_rank">#</th>
+            <th data-sort="pubkey" data-i18n="col_pubkey">pubkey</th>
+            <th data-sort="mean_drift_ms" class="num" data-i18n="col_mean">mean (ms)</th>
+            <th data-sort="median_drift_ms" class="num" data-i18n="col_median">median (ms)</th>
+            <th data-sort="stddev_drift_ms" class="num" data-i18n="col_stddev">stddev (ms)</th>
+            <th data-sort="p10_drift_ms" class="num" data-i18n="col_p10">p10 (ms)</th>
+            <th data-sort="p90_drift_ms" class="num" data-i18n="col_p90">p90 (ms)</th>
+            <th data-sort="n_samples" class="num" data-i18n="col_n">n</th>
+            <th data-sort="stake_xnt" class="num" data-i18n="col_stake">stake (XNT)</th>
+            <th data-sort="weighted_impact_ms_xnt" class="num" data-i18n="col_impact">impact</th>
           </tr>
         </thead>
         <tbody id="ranking-body"></tbody>
       </table>
     </div>
     <div class="pagination">
-      <button id="prev">prev</button>
+      <button id="prev" type="button" data-i18n="prev_page">prev</button>
       <span id="page-info">page 1</span>
-      <button id="next">next</button>
+      <button id="next" type="button" data-i18n="next_page">next</button>
+    </div>
+  </section>
+
+  <section class="sources-section">
+    <div class="section-title" data-i18n="sources_section_title">NTP sources (chrony calibration)</div>
+    <div class="table-wrap">
+      <table class="sources-table">
+        <thead>
+          <tr>
+            <th data-i18n="sources_col_operator">Operator</th>
+            <th data-i18n="sources_col_country">Country</th>
+            <th data-i18n="sources_col_hostname">Hostname</th>
+            <th class="num" data-i18n="sources_col_stratum">Stratum</th>
+            <th data-i18n="sources_col_state">State</th>
+            <th class="num" data-i18n="sources_col_offset">Offset (µs)</th>
+            <th class="num" data-i18n="sources_col_last_rx">Last RX (s)</th>
+          </tr>
+        </thead>
+        <tbody id="sources-body"></tbody>
+      </table>
     </div>
   </section>
 
   <footer class="footer">
     <div>
-      <a href="https://github.com/PioWin-clo/x1-clockdrift" target="_blank" rel="noreferrer noopener">github</a>
+      <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener" data-i18n="footer_repo">github</a>
       &nbsp;·&nbsp;
-      <a href="https://github.com/PioWin-clo/x1-clockdrift/blob/main/docs/methodology.md" target="_blank" rel="noreferrer noopener">methodology</a>
+      <a href="https://github.com/PioWin-clo/X1-ClockDrift/blob/main/docs/methodology.md" target="_blank" rel="noreferrer noopener" data-i18n="footer_methodology">methodology</a>
     </div>
     <div id="meta-line">—</div>
   </footer>
 
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"
-        integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw=="
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

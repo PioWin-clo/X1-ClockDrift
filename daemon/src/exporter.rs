@@ -1,3 +1,4 @@
+use crate::chrony_reader;
 use crate::config::Config;
 use crate::db::{self, Pool};
 use anyhow::{Context, Result};
@@ -5,9 +6,24 @@ use serde::Serialize;
 use std::path::Path;
 
 const VALIDATORS_TOP_N: usize = 500;
+const BEST_SYNCED_TOP_N: i64 = 10;
+const BEST_SYNCED_MIN_SAMPLES: i64 = 5;
 const LAMPORTS_PER_XNT: f64 = 1_000_000_000.0;
+const HISTORY_BACKFILL_SECS: i64 = 7 * 86400;
 
 pub async fn run(pool: Pool, config: Config) {
+    tracing::info!(
+        lookback_days = HISTORY_BACKFILL_SECS / 86400,
+        "exporter backfilling network drift history"
+    );
+    match db::backfill_history(&pool, HISTORY_BACKFILL_SECS).await {
+        Ok(n) => tracing::info!(buckets = n, "backfill complete"),
+        Err(e) => {
+            tracing::warn!(error = %e, "history backfill failed");
+            let _ = db::record_error(&pool, "exporter", &format!("backfill: {e}")).await;
+        }
+    }
+
     let interval = std::time::Duration::from_secs(config.export_interval_secs);
     tracing::info!(secs = config.export_interval_secs, "exporter starting");
 
@@ -104,6 +120,63 @@ struct MetaJson {
     total_votes_collected: i64,
     earliest_slot_observed: Option<i64>,
     latest_slot_observed: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct BestValidatorJson {
+    rank: i64,
+    vote_account: String,
+    n_samples: i64,
+    mean_drift_ms: f64,
+    median_drift_ms: f64,
+    stddev_drift_ms: f64,
+    p10_drift_ms: f64,
+    p90_drift_ms: f64,
+    stake_lamports: i64,
+    stake_xnt: f64,
+}
+
+#[derive(Serialize)]
+struct ChronyTrackingJson {
+    stratum: Option<i64>,
+    reference_id: Option<String>,
+    reference_ip: Option<String>,
+    reference_hostname: Option<String>,
+    reference_operator: Option<String>,
+    reference_country_code: Option<String>,
+    system_offset_us: Option<i64>,
+    last_offset_us: Option<i64>,
+    rms_offset_us: Option<i64>,
+    frequency_ppm: Option<f64>,
+    skew_ppm: Option<f64>,
+    root_delay_ms: Option<f64>,
+    root_dispersion_ms: Option<f64>,
+    update_interval_secs: Option<f64>,
+    leap_status: Option<String>,
+    updated_at_utc: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ChronySourceJson {
+    ip: String,
+    hostname: String,
+    operator: String,
+    country_code: Option<String>,
+    country_name: Option<String>,
+    stratum: Option<i64>,
+    state: Option<String>,
+    state_label_en: String,
+    state_label_pl: String,
+    offset_us: Option<i64>,
+    last_rx_secs: Option<i64>,
+    reach_octal: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ChronyJson {
+    wall_clock_utc: String,
+    tracking: ChronyTrackingJson,
+    sources: Vec<ChronySourceJson>,
 }
 
 pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
@@ -208,17 +281,144 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         latest_slot_observed: latest,
     };
 
+    // Best-synced validators: smallest abs(mean) with at least N samples.
+    let best_rows = db::get_best_synced_validators(pool, BEST_SYNCED_TOP_N, BEST_SYNCED_MIN_SAMPLES)
+        .await
+        .unwrap_or_default();
+    let best_json: Vec<BestValidatorJson> = best_rows
+        .into_iter()
+        .enumerate()
+        .map(|(idx, s)| {
+            let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
+            BestValidatorJson {
+                rank: (idx as i64) + 1,
+                vote_account: s.validator,
+                n_samples: s.n_samples,
+                mean_drift_ms: s.mean_drift_ms,
+                median_drift_ms: s.median_drift_ms,
+                stddev_drift_ms: s.stddev_drift_ms,
+                p10_drift_ms: s.p10_drift_ms,
+                p90_drift_ms: s.p90_drift_ms,
+                stake_lamports: s.last_stake_lamports,
+                stake_xnt,
+            }
+        })
+        .collect();
+
+    let chrony_json = build_chrony_json(pool, now_secs).await;
+
     write_atomic(&data_dir.join("summary.json"), &summary).await?;
     write_atomic(&data_dir.join("validators.json"), &validators_json).await?;
     write_atomic(&data_dir.join("history.json"), &history_json).await?;
     write_atomic(&data_dir.join("meta.json"), &meta).await?;
+    write_atomic(&data_dir.join("best_validators.json"), &best_json).await?;
+    write_atomic(&data_dir.join("chrony.json"), &chrony_json).await?;
 
     tracing::info!(
         n_validators = summary.n_validators_observed,
         n_samples_24h = summary.n_samples_24h,
+        n_best = best_json.len(),
+        chrony_sources = chrony_json.sources.len(),
         "wrote JSON exports"
     );
     Ok(())
+}
+
+fn seconds_to_us(s: f64) -> i64 {
+    (s * 1_000_000.0).round() as i64
+}
+
+fn seconds_to_ms(s: f64) -> f64 {
+    s * 1000.0
+}
+
+async fn build_chrony_json(pool: &Pool, now_secs: i64) -> ChronyJson {
+    let tracking = db::fetch_chrony_tracking(pool).await.unwrap_or(None);
+    let sources = db::fetch_chrony_sources(pool).await.unwrap_or_default();
+
+    let tracking_json = if let Some(t) = tracking {
+        // Resolve hostname/operator/country for the reference IP.
+        let (ref_hostname, ref_operator, ref_cc) = match &t.reference_ip {
+            Some(ip) => {
+                let (hostname, operator, cc, _cn) = chrony_reader::lookup_source(ip);
+                (Some(hostname), Some(operator), cc)
+            }
+            None => (None, None, None),
+        };
+        ChronyTrackingJson {
+            stratum: t.stratum,
+            reference_id: t.reference_id,
+            reference_ip: t.reference_ip,
+            reference_hostname: ref_hostname,
+            reference_operator: ref_operator,
+            reference_country_code: ref_cc,
+            system_offset_us: t.system_offset_seconds.map(seconds_to_us),
+            last_offset_us: t.last_offset_seconds.map(seconds_to_us),
+            rms_offset_us: t.rms_offset_seconds.map(seconds_to_us),
+            frequency_ppm: t.frequency_ppm,
+            skew_ppm: t.skew_ppm,
+            root_delay_ms: t.root_delay_seconds.map(seconds_to_ms),
+            root_dispersion_ms: t.root_dispersion_seconds.map(seconds_to_ms),
+            update_interval_secs: t.update_interval_seconds,
+            leap_status: t.leap_status,
+            updated_at_utc: Some(format_iso(t.updated_at)),
+        }
+    } else {
+        ChronyTrackingJson {
+            stratum: None,
+            reference_id: None,
+            reference_ip: None,
+            reference_hostname: None,
+            reference_operator: None,
+            reference_country_code: None,
+            system_offset_us: None,
+            last_offset_us: None,
+            rms_offset_us: None,
+            frequency_ppm: None,
+            skew_ppm: None,
+            root_delay_ms: None,
+            root_dispersion_ms: None,
+            update_interval_secs: None,
+            leap_status: None,
+            updated_at_utc: None,
+        }
+    };
+
+    let sources_json: Vec<ChronySourceJson> = sources
+        .into_iter()
+        .map(|s| {
+            let state_str = s.state.as_deref().unwrap_or("unknown");
+            let (label_en, label_pl) = chrony_reader::state_labels(state_str);
+            let offset_us = s.last_sample_offset_seconds.map(seconds_to_us);
+            let reach_octal = s.reach.map(|r| r.to_string());
+            ChronySourceJson {
+                ip: s.ip,
+                hostname: s.hostname,
+                operator: s.operator,
+                country_code: s.country_code,
+                country_name: s.country_name,
+                stratum: s.stratum,
+                state: s.state,
+                state_label_en: label_en.to_string(),
+                state_label_pl: label_pl.to_string(),
+                offset_us,
+                last_rx_secs: s.last_rx_seconds,
+                reach_octal,
+            }
+        })
+        .collect();
+
+    ChronyJson {
+        wall_clock_utc: format_iso_millis(now_secs),
+        tracking: tracking_json,
+        sources: sources_json,
+    }
+}
+
+fn format_iso_millis(ts: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
+        .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".into())
 }
 
 async fn total_votes_count(pool: &Pool) -> Result<i64> {

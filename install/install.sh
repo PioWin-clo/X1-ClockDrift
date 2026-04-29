@@ -19,6 +19,17 @@ if [ "$(id -un)" != "x1pio" ]; then
   exit 1
 fi
 
+# Soft dependency: chrony. The daemon's chrony_reader task spawns
+# `chronyc -c tracking` and `chronyc -c sources` every 30s to populate
+# the "My clock vs world" dashboard section. If chronyc is not on PATH,
+# the daemon logs a warning and continues — chain-drift measurement is
+# unaffected, but the host-clock-vs-UTC display will be blank.
+if ! command -v chronyc >/dev/null 2>&1; then
+  echo "==> WARNING: chronyc not found in PATH"
+  echo "    Install on Ubuntu/Debian:  sudo apt-get install -y chrony"
+  echo "    Without it the dashboard's host-clock section will be empty."
+fi
+
 echo "==> Creating directories at $INSTALL_DIR"
 mkdir -p "$BIN_DIR" "$REPO_DIR" "$FRONTEND_DIR"
 chmod 0755 "$INSTALL_DIR"

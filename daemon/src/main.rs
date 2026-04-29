@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 mod api;
+mod chrony_reader;
 mod config;
 mod db;
 mod exporter;
@@ -102,6 +103,11 @@ async fn run(config_path: &std::path::Path) -> Result<()> {
     let stake_secs = cfg.stake_refresh_secs;
     tokio::spawn(async move {
         stake_refresher::run(pool_sr, rpc_sr, stake_secs).await;
+    });
+
+    let pool_chrony = pool.clone();
+    tokio::spawn(async move {
+        chrony_reader::run(pool_chrony).await;
     });
 
     let pool_ex = pool.clone();

@@ -37,6 +37,46 @@ pub struct NetworkBucket {
     pub n_samples: i64,
 }
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ChronyTracking {
+    pub updated_at: i64,
+    pub reference_id: Option<String>,
+    pub reference_ip: Option<String>,
+    pub stratum: Option<i64>,
+    pub ref_time_unix: Option<f64>,
+    pub system_offset_seconds: Option<f64>,
+    pub last_offset_seconds: Option<f64>,
+    pub rms_offset_seconds: Option<f64>,
+    pub frequency_ppm: Option<f64>,
+    pub residual_freq_ppm: Option<f64>,
+    pub skew_ppm: Option<f64>,
+    pub root_delay_seconds: Option<f64>,
+    pub root_dispersion_seconds: Option<f64>,
+    pub update_interval_seconds: Option<f64>,
+    pub leap_status: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ChronySource {
+    pub ip: String,
+    pub hostname: String,
+    pub operator: String,
+    pub country_code: Option<String>,
+    pub country_name: Option<String>,
+    pub mode: Option<String>,
+    pub state: Option<String>,
+    pub stratum: Option<i64>,
+    pub poll_log2: Option<i64>,
+    pub reach: Option<i64>,
+    pub last_rx_seconds: Option<i64>,
+    pub last_sample_offset_seconds: Option<f64>,
+    pub last_sample_original_seconds: Option<f64>,
+    pub last_sample_error_seconds: Option<f64>,
+    pub updated_at: i64,
+}
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS slot_obs (
     slot INTEGER PRIMARY KEY,
@@ -89,6 +129,43 @@ CREATE TABLE IF NOT EXISTS error_log (
     message TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_error_log_ts ON error_log(ts);
+
+CREATE TABLE IF NOT EXISTS chrony_tracking (
+    id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    updated_at INTEGER NOT NULL,
+    reference_id TEXT,
+    reference_ip TEXT,
+    stratum INTEGER,
+    ref_time_unix REAL,
+    system_offset_seconds REAL,
+    last_offset_seconds REAL,
+    rms_offset_seconds REAL,
+    frequency_ppm REAL,
+    residual_freq_ppm REAL,
+    skew_ppm REAL,
+    root_delay_seconds REAL,
+    root_dispersion_seconds REAL,
+    update_interval_seconds REAL,
+    leap_status TEXT
+);
+
+CREATE TABLE IF NOT EXISTS chrony_sources (
+    ip TEXT PRIMARY KEY,
+    hostname TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    country_code TEXT,
+    country_name TEXT,
+    mode TEXT,
+    state TEXT,
+    stratum INTEGER,
+    poll_log2 INTEGER,
+    reach INTEGER,
+    last_rx_seconds INTEGER,
+    last_sample_offset_seconds REAL,
+    last_sample_original_seconds REAL,
+    last_sample_error_seconds REAL,
+    updated_at INTEGER NOT NULL
+);
 "#;
 
 pub async fn init(path: &str) -> Result<Pool> {
@@ -497,6 +574,186 @@ pub async fn fetch_validator_history(
     Ok(out)
 }
 
+pub async fn record_chrony_tracking(pool: &Pool, t: &ChronyTracking) -> Result<()> {
+    sqlx::query(
+        "INSERT OR REPLACE INTO chrony_tracking \
+         (id, updated_at, reference_id, reference_ip, stratum, ref_time_unix, \
+          system_offset_seconds, last_offset_seconds, rms_offset_seconds, \
+          frequency_ppm, residual_freq_ppm, skew_ppm, root_delay_seconds, \
+          root_dispersion_seconds, update_interval_seconds, leap_status) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+    )
+    .bind(t.updated_at)
+    .bind(&t.reference_id)
+    .bind(&t.reference_ip)
+    .bind(t.stratum)
+    .bind(t.ref_time_unix)
+    .bind(t.system_offset_seconds)
+    .bind(t.last_offset_seconds)
+    .bind(t.rms_offset_seconds)
+    .bind(t.frequency_ppm)
+    .bind(t.residual_freq_ppm)
+    .bind(t.skew_ppm)
+    .bind(t.root_delay_seconds)
+    .bind(t.root_dispersion_seconds)
+    .bind(t.update_interval_seconds)
+    .bind(&t.leap_status)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn record_chrony_sources(pool: &Pool, sources: &[ChronySource]) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM chrony_sources").execute(&mut *tx).await?;
+    for s in sources {
+        sqlx::query(
+            "INSERT INTO chrony_sources \
+             (ip, hostname, operator, country_code, country_name, mode, state, \
+              stratum, poll_log2, reach, last_rx_seconds, last_sample_offset_seconds, \
+              last_sample_original_seconds, last_sample_error_seconds, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        )
+        .bind(&s.ip)
+        .bind(&s.hostname)
+        .bind(&s.operator)
+        .bind(&s.country_code)
+        .bind(&s.country_name)
+        .bind(&s.mode)
+        .bind(&s.state)
+        .bind(s.stratum)
+        .bind(s.poll_log2)
+        .bind(s.reach)
+        .bind(s.last_rx_seconds)
+        .bind(s.last_sample_offset_seconds)
+        .bind(s.last_sample_original_seconds)
+        .bind(s.last_sample_error_seconds)
+        .bind(s.updated_at)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn fetch_chrony_tracking(pool: &Pool) -> Result<Option<ChronyTracking>> {
+    let row_opt = sqlx::query(
+        "SELECT updated_at, reference_id, reference_ip, stratum, ref_time_unix, \
+                system_offset_seconds, last_offset_seconds, rms_offset_seconds, \
+                frequency_ppm, residual_freq_ppm, skew_ppm, root_delay_seconds, \
+                root_dispersion_seconds, update_interval_seconds, leap_status \
+         FROM chrony_tracking WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row_opt.map(|r| ChronyTracking {
+        updated_at: r.try_get("updated_at").unwrap_or(0),
+        reference_id: r.try_get("reference_id").ok(),
+        reference_ip: r.try_get("reference_ip").ok(),
+        stratum: r.try_get("stratum").ok(),
+        ref_time_unix: r.try_get("ref_time_unix").ok(),
+        system_offset_seconds: r.try_get("system_offset_seconds").ok(),
+        last_offset_seconds: r.try_get("last_offset_seconds").ok(),
+        rms_offset_seconds: r.try_get("rms_offset_seconds").ok(),
+        frequency_ppm: r.try_get("frequency_ppm").ok(),
+        residual_freq_ppm: r.try_get("residual_freq_ppm").ok(),
+        skew_ppm: r.try_get("skew_ppm").ok(),
+        root_delay_seconds: r.try_get("root_delay_seconds").ok(),
+        root_dispersion_seconds: r.try_get("root_dispersion_seconds").ok(),
+        update_interval_seconds: r.try_get("update_interval_seconds").ok(),
+        leap_status: r.try_get("leap_status").ok(),
+    }))
+}
+
+pub async fn fetch_chrony_sources(pool: &Pool) -> Result<Vec<ChronySource>> {
+    let rows = sqlx::query(
+        "SELECT ip, hostname, operator, country_code, country_name, mode, state, \
+                stratum, poll_log2, reach, last_rx_seconds, last_sample_offset_seconds, \
+                last_sample_original_seconds, last_sample_error_seconds, updated_at \
+         FROM chrony_sources ORDER BY operator, hostname",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        out.push(ChronySource {
+            ip: r.try_get("ip")?,
+            hostname: r.try_get("hostname")?,
+            operator: r.try_get("operator")?,
+            country_code: r.try_get("country_code").ok(),
+            country_name: r.try_get("country_name").ok(),
+            mode: r.try_get("mode").ok(),
+            state: r.try_get("state").ok(),
+            stratum: r.try_get("stratum").ok(),
+            poll_log2: r.try_get("poll_log2").ok(),
+            reach: r.try_get("reach").ok(),
+            last_rx_seconds: r.try_get("last_rx_seconds").ok(),
+            last_sample_offset_seconds: r.try_get("last_sample_offset_seconds").ok(),
+            last_sample_original_seconds: r.try_get("last_sample_original_seconds").ok(),
+            last_sample_error_seconds: r.try_get("last_sample_error_seconds").ok(),
+            updated_at: r.try_get("updated_at").unwrap_or(0),
+        });
+    }
+    Ok(out)
+}
+
+pub async fn get_best_synced_validators(
+    pool: &Pool,
+    limit: i64,
+    min_samples: i64,
+) -> Result<Vec<ValidatorSummary>> {
+    let rows = sqlx::query(
+        "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at \
+         FROM validator_drift_summary \
+         WHERE n_samples >= ?1 \
+         ORDER BY ABS(mean_drift_ms) ASC \
+         LIMIT ?2",
+    )
+    .bind(min_samples)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        out.push(ValidatorSummary {
+            validator: r.try_get("validator")?,
+            n_samples: r.try_get("n_samples")?,
+            mean_drift_ms: r.try_get("mean_drift_ms")?,
+            median_drift_ms: r.try_get("median_drift_ms")?,
+            stddev_drift_ms: r.try_get("stddev_drift_ms")?,
+            p10_drift_ms: r.try_get("p10_drift_ms")?,
+            p90_drift_ms: r.try_get("p90_drift_ms")?,
+            last_seen_slot: r.try_get("last_seen_slot")?,
+            last_stake_lamports: r.try_get("last_stake_lamports")?,
+            updated_at: r.try_get("updated_at")?,
+        });
+    }
+    Ok(out)
+}
+
+/// Backfill `network_drift_history` for every 5-minute bucket whose start
+/// is within `lookback_secs` seconds of now. Calls
+/// [`recompute_network_history_bucket`] for each, which is idempotent
+/// (`INSERT OR REPLACE`) and a no-op when a bucket has no underlying
+/// vote/slot_obs data. Cheap enough to run at every daemon start.
+pub async fn backfill_history(pool: &Pool, lookback_secs: i64) -> Result<usize> {
+    let now = chrono::Utc::now().timestamp();
+    let earliest = now - lookback_secs;
+    let mut bucket = (earliest / 300) * 300;
+    let end = (now / 300) * 300;
+    let mut count = 0usize;
+    while bucket <= end {
+        recompute_network_history_bucket(pool, bucket).await?;
+        bucket += 300;
+        count += 1;
+    }
+    Ok(count)
+}
+
 pub async fn cleanup_old(pool: &Pool, retention_days: u32, history_retention_days: u32) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     let cutoff_us = (now - (retention_days as i64) * 86400) * 1_000_000;
@@ -648,5 +905,64 @@ mod tests {
         assert_eq!(summaries[0].validator, "VAL1");
         assert_eq!(summaries[0].n_samples, 2);
         assert_eq!(summaries[0].last_stake_lamports, 5_000_000_000);
+    }
+
+    /// Insert synthetic validator_drift_summary rows and verify
+    /// `get_best_synced_validators` orders by absolute mean drift ascending,
+    /// applies the min_samples filter, and respects the limit.
+    #[tokio::test]
+    async fn get_best_synced_orders_and_filters() {
+        let pool = init(":memory:").await.unwrap();
+        let now = chrono::Utc::now().timestamp();
+
+        let rows = [
+            // (validator, n_samples, mean_drift_ms, stake)
+            ("BIG_DRIFT_HIGH_N", 100i64, 5000.0, 1_000_000_000i64),
+            ("TINY_DRIFT_LOW_N", 3, 0.5, 100_000_000),
+            ("TINY_DRIFT_HIGH_N", 50, 1.2, 500_000_000),
+            ("ZERO_DRIFT", 8, 0.0, 200_000_000),
+            ("NEGATIVE_TINY", 20, -2.4, 300_000_000),
+            ("MEDIUM_DRIFT", 7, 50.0, 400_000_000),
+        ];
+        for (v, n, mean, stake) in rows.iter() {
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
+                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5)",
+            )
+            .bind(*v)
+            .bind(*n)
+            .bind(*mean)
+            .bind(*stake)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // min_samples=5 excludes TINY_DRIFT_LOW_N (n=3); top 3 by |mean|
+        // among the remaining is ZERO_DRIFT (0), TINY_DRIFT_HIGH_N (1.2),
+        // NEGATIVE_TINY (2.4).
+        let best = get_best_synced_validators(&pool, 3, 5).await.unwrap();
+        assert_eq!(best.len(), 3);
+        assert_eq!(best[0].validator, "ZERO_DRIFT");
+        assert_eq!(best[1].validator, "TINY_DRIFT_HIGH_N");
+        assert_eq!(best[2].validator, "NEGATIVE_TINY");
+        for w in best.windows(2) {
+            assert!(
+                w[0].mean_drift_ms.abs() <= w[1].mean_drift_ms.abs(),
+                "results not sorted by abs(mean) ascending"
+            );
+        }
+
+        // limit honoured even when more rows would qualify
+        let best_limit_1 = get_best_synced_validators(&pool, 1, 5).await.unwrap();
+        assert_eq!(best_limit_1.len(), 1);
+        assert_eq!(best_limit_1[0].validator, "ZERO_DRIFT");
+
+        // min_samples=200 filters everyone out
+        let none = get_best_synced_validators(&pool, 10, 200).await.unwrap();
+        assert!(none.is_empty());
     }
 }
