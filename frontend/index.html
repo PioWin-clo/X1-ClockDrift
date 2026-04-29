@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X1 ClockDrift</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">x1</span>
+    <span class="brand-name">ClockDrift</span>
+  </div>
+  <div class="tagline" data-i18n-html="tagline">Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.</div>
+  <div class="header-controls">
+    <label class="filter-toggle">
+      <input type="checkbox" id="hide-foundation">
+      <span data-i18n="hide_foundation">Hide X1 Labs</span>
+    </label>
+    <label class="filter-toggle">
+      <input type="checkbox" id="capybara-only">
+      <span data-i18n="capybara_qualifying_only">Capybara qualifying only (≥1000 XNT)</span>
+    </label>
+    <div class="lang-toggle" role="group" aria-label="Language">
+      <button id="btn-lang-en" class="lang-btn" type="button">🇬🇧 EN</button>
+      <button id="btn-lang-pl" class="lang-btn" type="button">🇵🇱 PL</button>
+    </div>
+  </div>
+  <div class="updated">
+    <span data-i18n="updated">updated</span>&nbsp;<span id="updated-ts">…</span>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- ===== HERO #1: X1 network time right now ===== -->
+  <section class="hero1-section">
+    <div class="section-title" data-i18n="hero1_title">X1 network time right now</div>
+    <div class="hero1-times">
+      <div class="hero1-time">
+        <div class="hero1-time-label" data-i18n="hero1_chain_time">X1 chain consensus</div>
+        <div class="hero1-time-value mono" id="hero1-chain-time">—</div>
+      </div>
+      <div class="hero1-time">
+        <div class="hero1-time-label" data-i18n="hero1_real_utc">Real UTC</div>
+        <div class="hero1-time-value mono" id="hero1-real-utc">—</div>
+      </div>
+    </div>
+    <div class="hero1-drift" id="hero1-drift">—</div>
+    <div class="hero1-trend mono" id="hero1-trend">—</div>
+  </section>
+
+  <!-- ===== HERO #2: validator clock health ===== -->
+  <section class="hero2-section">
+    <div class="section-title" data-i18n="hero2_title">Validator clock health</div>
+    <div class="health-cards">
+      <div class="health-card severity-critical">
+        <div class="health-icon">🚨</div>
+        <div class="health-label" data-i18n="health_critical">Critical</div>
+        <div class="health-value mono" id="n-critical">—</div>
+        <div class="health-sub" data-i18n="health_critical_sub">&gt;5s</div>
+      </div>
+      <div class="health-card severity-high">
+        <div class="health-icon">⚠️</div>
+        <div class="health-label" data-i18n="health_high">High</div>
+        <div class="health-value mono" id="n-high">—</div>
+        <div class="health-sub" data-i18n="health_high_sub">1-5s</div>
+      </div>
+      <div class="health-card severity-healthy">
+        <div class="health-icon">✅</div>
+        <div class="health-label" data-i18n="health_healthy">Healthy</div>
+        <div class="health-value mono" id="n-healthy">—</div>
+        <div class="health-sub" data-i18n="health_healthy_sub">&lt;1s</div>
+      </div>
+      <div class="health-card severity-foundation">
+        <div class="health-icon">🏛️</div>
+        <div class="health-label" data-i18n="health_foundation">X1 Labs</div>
+        <div class="health-value mono" id="n-foundation">—</div>
+        <div class="health-sub" data-i18n="health_foundation_sub">separate</div>
+      </div>
+    </div>
+    <div class="capybara-note" id="capybara-note">—</div>
+  </section>
+
+  <!-- ===== My clock vs world (kept) ===== -->
+  <section class="clock-section">
+    <div class="section-title" data-i18n="clock_section_title">My clock vs world</div>
+    <div class="clock-help" data-i18n="clock_help_text">…</div>
+    <div class="clock-grid">
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_wall">Wall clock (your browser)</div>
+        <div class="clock-cell-value mono" id="clock-wall-time">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_offset_label">Sentinel offset to UTC consensus</div>
+        <div class="clock-cell-value mono" id="clock-offset-value">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_rms_label">RMS offset</div>
+        <div class="clock-cell-value mono" id="clock-rms-value">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_stratum_label">Stratum</div>
+        <div class="clock-cell-value mono" id="clock-stratum-value">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_reference">Reference source</div>
+        <div class="clock-cell-value" id="clock-reference-value">—</div>
+      </div>
+      <div class="clock-cell">
+        <div class="clock-cell-label" data-i18n="clock_skew_label">Frequency skew</div>
+        <div class="clock-cell-value mono" id="clock-skew-value">—</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Network drift over time (kept, dual y-axis) ===== -->
+  <section class="chart-block">
+    <div class="chart-title" data-i18n="chart_history_title">Network drift over time (last 7 days, 5-minute buckets)</div>
+    <div class="chart-frame">
+      <canvas id="chart-history"></canvas>
+    </div>
+  </section>
+
+  <!-- ===== TOP WORST VALIDATORS ===== -->
+  <section class="worst-block">
+    <div class="ranking-head">
+      <div>
+        <div class="ranking-title" data-i18n="worst_table_title">Top worst validators</div>
+        <div class="section-help" data-i18n="worst_table_help">Sorted by absolute drift (worst first). Foundation nodes flagged but appear in their natural position.</div>
+      </div>
+      <div class="ranking-controls">
+        <select id="severity-filter" class="severity-filter">
+          <option value="all" data-i18n="filter_all">All</option>
+          <option value="critical" data-i18n="filter_critical">Critical only</option>
+          <option value="high" data-i18n="filter_high">High and worse</option>
+        </select>
+        <input class="search" id="search" type="search" data-i18n-attr-placeholder="ranking_search_placeholder" autocomplete="off">
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="worst-table">
+        <thead>
+          <tr>
+            <th data-i18n="col_rank">#</th>
+            <th data-sort="severity" data-i18n="col_severity">tag</th>
+            <th data-sort="pubkey" data-i18n="col_pubkey">pubkey</th>
+            <th data-sort="mean_drift_ms_abs" class="num" data-i18n="col_drift">drift (ms)</th>
+            <th data-sort="stddev_drift_ms" class="num" data-i18n="col_jitter">jitter (ms)</th>
+            <th data-sort="n_samples" class="num" data-i18n="col_n">n</th>
+            <th data-sort="stake_xnt" class="num" data-i18n="col_stake">stake (XNT)</th>
+          </tr>
+        </thead>
+        <tbody id="worst-body"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button id="prev" type="button" data-i18n="prev_page">prev</button>
+      <span id="page-info">page 1</span>
+      <button id="next" type="button" data-i18n="next_page">next</button>
+    </div>
+  </section>
+
+  <!-- ===== TOP 10 BEST SYNCED ===== -->
+  <section class="best-synced-section">
+    <div class="best-synced-header">
+      <div class="section-title" data-i18n="best_synced_title">Best synchronized validators (top 10)</div>
+      <div class="section-help" data-i18n="best_synced_help_v04">Validators with the smallest absolute drift. Min 1000 XNT stake (Capybara threshold), min 100 samples, foundation excluded.</div>
+    </div>
+    <div class="table-wrap">
+      <table class="best-synced-table">
+        <thead>
+          <tr>
+            <th data-i18n="col_rank">#</th>
+            <th data-i18n="col_pubkey">pubkey</th>
+            <th class="num" data-i18n="col_drift">drift (ms)</th>
+            <th class="num" data-i18n="col_jitter">jitter (ms)</th>
+            <th class="num" data-i18n="col_n">n</th>
+            <th class="num" data-i18n="col_stake">stake (XNT)</th>
+          </tr>
+        </thead>
+        <tbody id="best-synced-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== X1 LABS FOUNDATION showcase ===== -->
+  <section class="foundation-section">
+    <div class="section-title" data-i18n="foundation_table_title">🏛️ X1 Labs Foundation</div>
+    <div class="section-help" data-i18n="foundation_table_help">Official X1 Labs infrastructure. Shown separately because their drift is operational baseline, not validator misconfiguration.</div>
+    <div class="table-wrap">
+      <table class="foundation-table">
+        <thead>
+          <tr>
+            <th data-i18n="col_rank">#</th>
+            <th data-i18n="col_label">label</th>
+            <th data-i18n="col_pubkey">pubkey</th>
+            <th class="num" data-i18n="col_drift">drift (ms)</th>
+            <th class="num" data-i18n="col_jitter">jitter (ms)</th>
+            <th class="num" data-i18n="col_n">n</th>
+            <th class="num" data-i18n="col_stake">stake (XNT)</th>
+          </tr>
+        </thead>
+        <tbody id="foundation-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== DEEPER ANALYTICS (collapsible) ===== -->
+  <section class="analytics-section">
+    <details id="deeper-analytics">
+      <summary>
+        <span class="section-title" data-i18n="deeper_analytics">Deeper analytics</span>
+        <span class="analytics-hint" data-i18n="analytics_hint">distribution, correlation, signature groups</span>
+      </summary>
+
+      <div class="chart-block">
+        <div class="chart-title" data-i18n="chart_histogram_title">Validator drift distribution (mean drift, top 500)</div>
+        <div class="chart-frame">
+          <canvas id="chart-histogram"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-block">
+        <div class="chart-title" data-i18n="scatter_title">Stake vs drift correlation</div>
+        <div class="section-help" data-i18n="scatter_help">Each point is a validator. X-axis = stake (log scale). Y-axis = mean drift (ms). Cluster members share colour. Click a point for details.</div>
+        <div class="chart-frame">
+          <canvas id="chart-scatter"></canvas>
+        </div>
+        <div class="scatter-stats">
+          <span data-i18n="scatter_correlation">Correlation</span>:
+          <span id="scatter-r" class="mono">—</span>
+          &nbsp;·&nbsp;
+          <span data-i18n="scatter_slope">Slope</span>:
+          <span id="scatter-slope" class="mono">—</span>
+        </div>
+      </div>
+
+      <div class="clusters-section">
+        <div class="section-title" data-i18n="signature_groups_title">Drift signature groups</div>
+        <div class="section-help" data-i18n="signature_groups_help">Validators sharing identical drift values. May indicate shared infrastructure or coincidental NTP setup. Not necessarily 'farms'.</div>
+        <div class="clusters-row">
+          <div class="cluster-stat">
+            <span class="cluster-label" data-i18n="clusters_detected">Detected groups</span>
+            <span class="cluster-value" id="n-clusters">—</span>
+          </div>
+          <div class="cluster-stat">
+            <span class="cluster-label" data-i18n="cluster_validators">Validators in groups</span>
+            <span class="cluster-value" id="n-clustered">—</span>
+            <span class="cluster-pct" id="n-clustered-pct"></span>
+          </div>
+          <div class="cluster-stat">
+            <span class="cluster-label" data-i18n="largest_cluster">Largest group</span>
+            <span class="cluster-value" id="largest-cluster">—</span>
+          </div>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ===== NTP sources (kept) ===== -->
+  <section class="sources-section">
+    <div class="section-title" data-i18n="sources_section_title">NTP sources (chrony calibration)</div>
+    <div class="table-wrap">
+      <table class="sources-table">
+        <thead>
+          <tr>
+            <th data-i18n="sources_col_operator">Operator</th>
+            <th data-i18n="sources_col_country">Country</th>
+            <th data-i18n="sources_col_hostname">Hostname</th>
+            <th class="num" data-i18n="sources_col_stratum">Stratum</th>
+            <th data-i18n="sources_col_state">State</th>
+            <th class="num" data-i18n="sources_col_offset">Offset (µs)</th>
+            <th class="num" data-i18n="sources_col_last_rx">Last RX (s)</th>
+          </tr>
+        </thead>
+        <tbody id="sources-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div>
+      <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener" data-i18n="footer_repo">github</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/PioWin-clo/X1-ClockDrift/blob/main/docs/methodology.md" target="_blank" rel="noreferrer noopener" data-i18n="footer_methodology">methodology</a>
+    </div>
+    <div id="meta-line">—</div>
+  </footer>
+
+</main>
+
+<div class="modal-overlay" id="validator-modal" hidden>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 class="mono" id="modal-pubkey">…</h3>
+      <button class="modal-close" id="modal-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="modal-stats" id="modal-stats"></div>
+    <div class="modal-chart-frame">
+      <canvas id="modal-chart"></canvas>
+    </div>
+    <div class="modal-empty" id="modal-empty" hidden data-i18n="modal_limited_data">
+      Detailed history is only kept for the top 500 most-impactful and top 10 best-synced validators.
+    </div>
+    <div class="modal-link">
+      <a id="modal-explorer-link" target="_blank" rel="noreferrer noopener" data-i18n="modal_view_explorer">View on X1 Explorer</a>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
