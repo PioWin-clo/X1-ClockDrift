@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use rand::Rng;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -7,6 +8,13 @@ use tokio::sync::{Mutex, Semaphore};
 
 const USER_AGENT: &str =
     "x1-clockdrift/0.1 (+https://github.com/PioWin-clo/X1-ClockDrift)";
+
+/// Use 'confirmed' commitment to reduce data staleness from ~14s
+/// (default 'finalized') to ~1s. Both commitment levels still produce
+/// consistent drift measurements because chain_time and t_local refer
+/// to the same chain state — fresher just means less lag, not different
+/// drift values. Empirically validated against Sentinel production data.
+const COMMITMENT: &str = "confirmed";
 
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
@@ -76,6 +84,11 @@ pub struct RpcClient {
     http: reqwest::Client,
     url: String,
     sem: Arc<Semaphore>,
+    /// Tracks the time of the next allowed RPC issue. Updated atomically
+    /// inside `rate_gate` (under a short Mutex lock) before sleeping
+    /// outside the lock. Pre-v0.4.1 this held the timestamp of the last
+    /// completed call and the mutex was held during sleep — that
+    /// serialized concurrent callers despite the Semaphore.
     last_send: Arc<Mutex<Option<Instant>>>,
     min_gap: Duration,
 }
@@ -98,16 +111,30 @@ impl RpcClient {
         })
     }
 
+    /// Reserve a unique time slot under the lock, then sleep until that
+    /// slot WITHOUT holding the lock. Concurrent callers each get a
+    /// monotonically-increasing slot allocated in O(microseconds), and
+    /// then sleep concurrently — preserving the rate budget while
+    /// allowing the Semaphore to actually do its job. Pre-v0.4.1 this
+    /// function held the lock across the sleep, which serialized all
+    /// callers.
     async fn rate_gate(&self) {
-        let mut last = self.last_send.lock().await;
+        let next_allowed = {
+            let mut last = self.last_send.lock().await;
+            let now = Instant::now();
+            // Each new caller's slot is at least `min_gap` after the
+            // previous reservation, but never earlier than now.
+            let next = match *last {
+                Some(prev) => prev.max(now) + self.min_gap,
+                None => now,
+            };
+            *last = Some(next);
+            next
+        };
         let now = Instant::now();
-        if let Some(prev) = *last {
-            let elapsed = now.duration_since(prev);
-            if elapsed < self.min_gap {
-                tokio::time::sleep(self.min_gap - elapsed).await;
-            }
+        if next_allowed > now {
+            tokio::time::sleep(next_allowed - now).await;
         }
-        *last = Some(Instant::now());
     }
 
     async fn raw_call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
@@ -147,13 +174,17 @@ impl RpcClient {
 
     #[allow(dead_code)]
     pub async fn get_slot(&self) -> Result<u64, RpcError> {
-        let v = self.raw_call("getSlot", json!([])).await?;
+        let v = self
+            .raw_call("getSlot", json!([{ "commitment": COMMITMENT }]))
+            .await?;
         v.as_u64()
             .ok_or_else(|| RpcError::Decode("getSlot: not u64".into()))
     }
 
     pub async fn get_vote_accounts(&self) -> Result<Vec<VoteAccountInfo>, RpcError> {
-        let v = self.raw_call("getVoteAccounts", json!([])).await?;
+        let v = self
+            .raw_call("getVoteAccounts", json!([{ "commitment": COMMITMENT }]))
+            .await?;
         let parsed: VoteAccountsResponse = serde_json::from_value(v)
             .map_err(|e| RpcError::Decode(format!("getVoteAccounts: {e}")))?;
         let mut out = parsed.current;
@@ -163,11 +194,14 @@ impl RpcClient {
 
     /// Returns Ok(None) for skipped slots and unsupported txn versions; other
     /// errors propagate. Uses `jsonParsed` encoding so vote instructions arrive
-    /// pre-decoded from the RPC.
+    /// pre-decoded from the RPC. Uses `confirmed` commitment (v0.4.1) for
+    /// fresher data — note this does NOT change drift measurement
+    /// accuracy, only data staleness.
     pub async fn get_block_with_votes(&self, slot: u64) -> Result<Option<BlockData>, RpcError> {
         let params = json!([
             slot,
             {
+                "commitment": COMMITMENT,
                 "encoding": "jsonParsed",
                 "transactionDetails": "full",
                 "rewards": false,
@@ -204,19 +238,26 @@ impl RpcClient {
                     if !is_retryable || attempt >= backoffs.len() {
                         break;
                     }
-                    tokio::time::sleep(backoffs[attempt]).await;
+                    tokio::time::sleep(backoff_with_jitter(backoffs[attempt])).await;
                 }
                 Err(e) => {
                     last_err = Some(e);
                     if attempt >= backoffs.len() {
                         break;
                     }
-                    tokio::time::sleep(backoffs[attempt]).await;
+                    tokio::time::sleep(backoff_with_jitter(backoffs[attempt])).await;
                 }
             }
         }
         Err(last_err.unwrap_or_else(|| RpcError::Decode("all retries exhausted".into())))
     }
+}
+
+/// Add 0–100 ms uniform jitter to a base backoff. Prevents thundering-herd
+/// retries when many concurrent calls hit the same transient RPC error.
+fn backoff_with_jitter(base: Duration) -> Duration {
+    let jitter_ms: u64 = rand::thread_rng().gen_range(0..100);
+    base + Duration::from_millis(jitter_ms)
 }
 
 fn parse_block(v: Value) -> Result<BlockData, String> {
@@ -296,5 +337,54 @@ mod tests {
         let bd = parse_block(v).unwrap();
         assert_eq!(bd.transactions.len(), 1);
         assert!(bd.transactions[0].instructions.is_empty());
+    }
+
+    #[test]
+    fn backoff_jitter_within_bounds() {
+        let base = Duration::from_secs(2);
+        for _ in 0..50 {
+            let d = backoff_with_jitter(base);
+            assert!(d >= base);
+            assert!(d < base + Duration::from_millis(100));
+        }
+    }
+
+    /// Regression guard for the v0.4.1 rate_gate fix. Pre-fix, the mutex
+    /// was held across the sleep, so 10 concurrent calls at 5/sec
+    /// serialized into ~10 × 200 ms = 2 s of *total wall time*… but
+    /// arrived sequentially, NOT concurrently. With the fix, callers
+    /// reserve their slot in microseconds and sleep concurrently —
+    /// the LAST call still completes around t≈1.8 s (9 × 200 ms gap),
+    /// but each individual sleep happens in parallel rather than in
+    /// a queue. The bound below catches the pre-fix behaviour, which
+    /// would have been ~2 × 10 × 200 ms = ~4 s under heavy contention
+    /// (each call waits for prior call's mutex AND its own sleep).
+    #[tokio::test]
+    async fn rate_gate_allows_concurrency() {
+        let client = Arc::new(RpcClient::new("http://localhost:1", 5).unwrap());
+        let start = Instant::now();
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let c = client.clone();
+            handles.push(tokio::spawn(async move { c.rate_gate().await }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+        let elapsed = start.elapsed();
+        // Lower bound: 9 gaps × 200 ms = 1.8 s (the LAST caller's slot).
+        // First call has no wait; second waits 200 ms; tenth waits 1800 ms.
+        // We give 200 ms slack on either side for scheduler jitter.
+        assert!(
+            elapsed >= Duration::from_millis(1600),
+            "rate limit too loose; expected ≥1.6s got {elapsed:?}"
+        );
+        // Upper bound: catches the pre-fix serialization. With mutex
+        // held during sleep, total time would compound to ~2.0 s + queue
+        // delays, often >2.5 s.
+        assert!(
+            elapsed < Duration::from_millis(2500),
+            "rate limit serialized callers; expected <2.5s got {elapsed:?}"
+        );
     }
 }

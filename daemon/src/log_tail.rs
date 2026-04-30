@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader, SeekFrom};
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 
 /// Pattern matches:
 ///   [2026-04-28T07:31:24.442703241Z INFO  solana_runtime::bank] bank frozen: 46131510 hash: ...
@@ -19,15 +20,22 @@ const PATTERN: &str = r"^\[(?P<ts>[^\s]+Z)\s+INFO\s+solana_runtime::bank\] bank 
 const TRUNCATE_LOG_THROTTLE_SECS: u64 = 60;
 const POLL_INTERVAL_MS: u64 = 200;
 
-pub async fn run(log_path: String, pool: Pool) -> Result<()> {
+pub async fn run(log_path: String, pool: Pool, shutdown: CancellationToken) -> Result<()> {
     let re = Regex::new(PATTERN).context("invalid log pattern regex")?;
     tracing::info!(path = %log_path, "log_tail starting");
 
     loop {
-        match tail_once(&log_path, &re, &pool).await {
+        if shutdown.is_cancelled() {
+            return Ok(());
+        }
+        match tail_once(&log_path, &re, &pool, &shutdown).await {
             Ok(_) => {
-                // Only reachable when the file's inode changed under us
-                // (real rotation / replacement). Re-open in 5s.
+                // Reachable when the file's inode changed under us
+                // (real rotation / replacement) OR shutdown was requested.
+                if shutdown.is_cancelled() {
+                    tracing::info!("log_tail shutting down");
+                    return Ok(());
+                }
                 tracing::info!("log_tail reopening after rotation in 5s");
             }
             Err(e) => {
@@ -35,11 +43,19 @@ pub async fn run(log_path: String, pool: Pool) -> Result<()> {
                 let _ = db::record_error(&pool, "log_tail", &e.to_string()).await;
             }
         }
-        sleep(Duration::from_secs(5)).await;
+        tokio::select! {
+            _ = shutdown.cancelled() => return Ok(()),
+            _ = sleep(Duration::from_secs(5)) => {}
+        }
     }
 }
 
-async fn tail_once(path: &str, re: &Regex, pool: &Pool) -> Result<()> {
+async fn tail_once(
+    path: &str,
+    re: &Regex,
+    pool: &Pool,
+    shutdown: &CancellationToken,
+) -> Result<()> {
     let p = Path::new(path);
     if !p.exists() {
         anyhow::bail!("log file does not exist: {path}");
@@ -60,9 +76,17 @@ async fn tail_once(path: &str, re: &Regex, pool: &Pool) -> Result<()> {
 
     loop {
         buf.clear();
-        let n = reader.read_line(&mut buf).await?;
+        let n = tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Ok(()),
+            res = reader.read_line(&mut buf) => res?,
+        };
         if n == 0 {
-            sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => return Ok(()),
+                _ = sleep(Duration::from_millis(POLL_INTERVAL_MS)) => {}
+            }
 
             let meta = match tokio::fs::metadata(path).await {
                 Ok(m) => m,
@@ -202,8 +226,10 @@ mod tests {
         let pool = crate::db::init(":memory:").await.unwrap();
         let pool_clone = pool.clone();
         let path_clone = path_str.clone();
+        let shutdown = CancellationToken::new();
+        let shutdown_clone = shutdown.clone();
         let handle = tokio::spawn(async move {
-            let _ = run(path_clone, pool_clone).await;
+            let _ = run(path_clone, pool_clone, shutdown_clone).await;
         });
 
         // Let log_tail open + seek to EOF.
@@ -269,7 +295,8 @@ mod tests {
 
         let count_after_trunc = crate::db::slot_obs_count(&pool).await.unwrap();
 
-        handle.abort();
+        shutdown.cancel();
+        let _ = handle.await;
         let _ = std::fs::remove_file(&path);
 
         assert!(

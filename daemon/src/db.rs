@@ -331,14 +331,17 @@ pub async fn flag_foundation_validators(pool: &Pool) -> Result<usize> {
     Ok(count)
 }
 
-/// Severity bucket for a validator given their drift stats and foundation
-/// status. Returns None for under-sampled validators (n_samples < 5).
-pub fn classify_severity(n_samples: i64, mean_drift_ms: f64, is_foundation: bool) -> Option<&'static str> {
+/// Severity bucket for a validator given their drift stats. Returns None
+/// for under-sampled validators (n_samples < 5).
+///
+/// v0.4.1: foundation flag no longer short-circuits to "healthy". A
+/// foundation node with +5s drift has a real operational problem and
+/// should be classified `critical` like any other validator. The
+/// `is_foundation` column is independent and rendered as a separate
+/// 🏛️ badge on the frontend (next to the severity icon, not instead).
+pub fn classify_severity(n_samples: i64, mean_drift_ms: f64) -> Option<&'static str> {
     if n_samples < 5 {
         return None;
-    }
-    if is_foundation {
-        return Some("foundation");
     }
     let abs = mean_drift_ms.abs();
     if abs > 5000.0 {
@@ -550,10 +553,12 @@ pub async fn recompute_validator_summaries(pool: &Pool) -> Result<usize> {
         // so the row carries correct flags from the moment it lands. Avoids
         // a second-pass UPDATE and a window where the dashboard could read
         // unflagged rows.
+        // v0.4.1: severity is independent of foundation status — a foundation
+        // node with critical drift is still critical.
         let foundation_node = crate::foundation::lookup_foundation(&validator);
         let is_foundation: i64 = if foundation_node.is_some() { 1 } else { 0 };
         let foundation_label: Option<&'static str> = foundation_node.map(|f| f.label);
-        let severity = classify_severity(stats.n as i64, stats.mean, is_foundation == 1);
+        let severity = classify_severity(stats.n as i64, stats.mean);
 
         sqlx::query(
             "INSERT INTO validator_drift_summary \
@@ -1998,14 +2003,32 @@ mod tests {
             .fetch_one(&pool).await.unwrap().try_get("n").unwrap();
         assert_eq!(n_chrony_history, 1);
 
-        // classify_severity helper sanity.
-        assert_eq!(classify_severity(2, 0.0, false), None);
-        assert_eq!(classify_severity(10, 6000.0, false), Some("critical"));
-        assert_eq!(classify_severity(10, 2000.0, false), Some("high"));
-        assert_eq!(classify_severity(10, 100.0, false), Some("healthy"));
-        assert_eq!(classify_severity(10, 50.0, true), Some("foundation"));
+        // classify_severity helper sanity (v0.4.1 — no foundation arg).
+        assert_eq!(classify_severity(2, 0.0), None);
+        assert_eq!(classify_severity(10, 6000.0), Some("critical"));
+        assert_eq!(classify_severity(10, 2000.0), Some("high"));
+        assert_eq!(classify_severity(10, 100.0), Some("healthy"));
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// v0.4.1: foundation status no longer hides drift severity.
+    /// A foundation node with critical drift must still be classified
+    /// `critical` so it shows up red on the dashboard.
+    #[test]
+    fn foundation_node_with_high_drift_classified_correctly() {
+        // -883 ms is the production X1 Labs baseline → "healthy".
+        assert_eq!(classify_severity(100, -883.0), Some("healthy"));
+        // -5500 ms — even on a foundation node — must be "critical".
+        assert_eq!(classify_severity(100, -5500.0), Some("critical"));
+        assert_eq!(classify_severity(100, 5500.0), Some("critical"));
+        // -1500 ms → "high" regardless of foundation status.
+        assert_eq!(classify_severity(100, -1500.0), Some("high"));
+        // Boundary: exactly 1s and exactly 5s.
+        assert_eq!(classify_severity(100, 1000.0), Some("healthy"));  // not >1000
+        assert_eq!(classify_severity(100, 1000.1), Some("high"));
+        assert_eq!(classify_severity(100, 5000.0), Some("high"));     // not >5000
+        assert_eq!(classify_severity(100, 5000.1), Some("critical"));
     }
 }

@@ -813,8 +813,10 @@ function renderWorstTable() {
   el.worstBody.innerHTML = '';
   slice.forEach((v, i) => {
     const tr = document.createElement('tr');
+    // v0.4.1: row tint follows severity only. Foundation status is shown
+    // by the 🏛️ badge in the severity cell, not by background colour, so
+    // an X1 Labs node with critical drift goes red — same as any other.
     tr.classList.add(`row-${v.severity || 'unknown'}`);
-    if (v.is_foundation) tr.classList.add('row-foundation');
     tr.appendChild(td(String(start + i + 1)));
     tr.appendChild(severityCell(v));
     tr.appendChild(pubkeyCell(v.pubkey, v));
@@ -832,24 +834,42 @@ function renderWorstTable() {
 }
 
 function severityCell(v) {
+  // v0.4.1: severity icon and foundation badge are independent. A
+  // foundation node with critical drift now shows BOTH 🚨 and 🏛️ —
+  // pre-fix, the foundation icon hid the severity.
   const e = document.createElement('td');
   e.classList.add('severity-cell');
+  const sevIcon = document.createElement('span');
+  sevIcon.classList.add('sev-icon');
+  switch (v.severity) {
+    case 'critical':
+      sevIcon.textContent = '🚨';
+      sevIcon.classList.add('sev-critical');
+      sevIcon.title = 'Critical: drift > 5s';
+      break;
+    case 'high':
+      sevIcon.textContent = '⚠️';
+      sevIcon.classList.add('sev-high');
+      sevIcon.title = 'High: drift 1–5s';
+      break;
+    case 'healthy':
+      sevIcon.textContent = '✅';
+      sevIcon.classList.add('sev-healthy');
+      sevIcon.title = 'Healthy: drift < 1s';
+      break;
+    default:
+      sevIcon.textContent = '·';
+      sevIcon.classList.add('sev-unknown');
+      sevIcon.title = 'Insufficient data';
+      break;
+  }
+  e.appendChild(sevIcon);
   if (v.is_foundation) {
-    e.textContent = '🏛️';
-    e.title = v.foundation_label || 'X1 Labs Foundation';
-    e.classList.add('severity-foundation');
-  } else if (v.severity === 'critical') {
-    e.textContent = '🚨';
-    e.classList.add('severity-critical');
-  } else if (v.severity === 'high') {
-    e.textContent = '⚠️';
-    e.classList.add('severity-high');
-  } else if (v.severity === 'healthy') {
-    e.textContent = '·';
-    e.classList.add('severity-healthy');
-  } else {
-    e.textContent = '?';
-    e.classList.add('severity-unknown');
+    const foundationBadge = document.createElement('span');
+    foundationBadge.classList.add('foundation-badge');
+    foundationBadge.textContent = '🏛️';
+    foundationBadge.title = v.foundation_label || 'X1 Labs Foundation';
+    e.appendChild(foundationBadge);
   }
   return e;
 }

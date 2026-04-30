@@ -11,6 +11,7 @@ use axum::{
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
@@ -20,7 +21,7 @@ struct AppState {
     config: Arc<Config>,
 }
 
-pub async fn run(pool: Pool, config: Config) -> Result<()> {
+pub async fn run(pool: Pool, config: Config, shutdown: CancellationToken) -> Result<()> {
     let listen = config.api_listen.clone();
     let data_dir = PathBuf::from(&config.git_repo_path).join("data");
     let frontend_dir = config
@@ -46,7 +47,10 @@ pub async fn run(pool: Pool, config: Config) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     tracing::info!(listen = %listen, "api server listening");
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move { shutdown.cancelled().await })
+        .await?;
+    tracing::info!("api server shut down");
     Ok(())
 }
 

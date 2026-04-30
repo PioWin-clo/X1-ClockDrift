@@ -4,6 +4,7 @@ use crate::vote_parser;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
 
 const MAX_INFLIGHT: usize = 16;
 
@@ -16,7 +17,7 @@ const BLOCK_SAMPLE_INTERVAL_SLOTS: u64 = 500;
 /// only matters as a heartbeat — actual sample rate is ~3 minutes.
 const POLL_INTERVAL_SECS: u64 = 30;
 
-pub async fn run(pool: Pool, rpc: Arc<RpcClient>) {
+pub async fn run(pool: Pool, rpc: Arc<RpcClient>, shutdown: CancellationToken) {
     let limiter = Arc::new(Semaphore::new(MAX_INFLIGHT));
     let mut last_sampled_slot: u64 = 0;
     tracing::info!(
@@ -26,7 +27,14 @@ pub async fn run(pool: Pool, rpc: Arc<RpcClient>) {
     );
 
     loop {
-        tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => {
+                tracing::info!("vote_collector shutting down");
+                return;
+            }
+            _ = tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)) => {}
+        }
 
         let current_slot = match rpc.get_slot().await {
             Ok(s) => s,

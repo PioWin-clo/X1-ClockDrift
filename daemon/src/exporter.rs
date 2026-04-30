@@ -4,6 +4,7 @@ use crate::db::{self, Pool};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
+use tokio_util::sync::CancellationToken;
 
 const VALIDATORS_TOP_N: usize = 500;
 const BEST_SYNCED_TOP_N: i64 = 10;
@@ -17,7 +18,7 @@ const LAMPORTS_PER_XNT: f64 = 1_000_000_000.0;
 const CAPYBARA_THRESHOLD_LAMPORTS: i64 = 1_000 * 1_000_000_000;
 const HISTORY_BACKFILL_SECS: i64 = 7 * 86400;
 
-pub async fn run(pool: Pool, config: Config) {
+pub async fn run(pool: Pool, config: Config, shutdown: CancellationToken) {
     tracing::info!(
         lookback_days = HISTORY_BACKFILL_SECS / 86400,
         "exporter backfilling network drift history"
@@ -34,7 +35,16 @@ pub async fn run(pool: Pool, config: Config) {
     tracing::info!(secs = config.export_interval_secs, "exporter starting");
 
     loop {
-        tokio::time::sleep(interval).await;
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => {
+                tracing::info!("exporter shutting down (cycle in flight, if any, runs to completion)");
+                return;
+            }
+            _ = tokio::time::sleep(interval) => {}
+        }
+        // Cycle runs uninterrupted once started — shutdown can wait,
+        // because aborting mid-write would risk a half-pushed git commit.
         if let Err(e) = cycle(&pool, &config).await {
             tracing::warn!(error = %e, "export cycle outer error");
             let _ = db::record_error(&pool, "exporter", &e.to_string()).await;

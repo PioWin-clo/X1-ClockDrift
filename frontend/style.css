@@ -672,15 +672,27 @@ table.worst-table td.pos { color: var(--bad); }
 table.worst-table td.neg { color: var(--accent); }
 table.worst-table td.zero { color: var(--text-dim); }
 
-/* Severity badge cell */
+/* Severity badge cell — v0.4.1 shows TWO icons side by side:
+   the severity glyph (🚨 / ⚠️ / ✅ / ·) followed by the foundation
+   badge (🏛️) when applicable. */
 .severity-cell {
   text-align: center;
   font-size: 14px;
-  width: 32px;
+  white-space: nowrap;
+  min-width: 48px;
 }
+.severity-cell .sev-icon { display: inline-block; }
+.severity-cell .foundation-badge {
+  display: inline-block;
+  margin-left: 4px;
+  color: var(--accent);
+}
+.row-critical    td.pos, .row-critical td.neg { font-weight: 700; }
+/* Foundation table (in its own showcase section) keeps its own subtle
+   blue tint via .row-foundation; that selector is no longer applied
+   in the worst-table — see app.js severityCell rationale. */
 .row-foundation td { background: rgba(88, 166, 255, 0.04); }
 .row-foundation:hover td { background: rgba(88, 166, 255, 0.1); }
-.row-critical    td.pos, .row-critical td.neg { font-weight: 700; }
 
 /* Foundation table */
 .foundation-section {

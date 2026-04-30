@@ -2,6 +2,7 @@ use crate::db::{self, ChronySource, ChronyTracking, Pool};
 use anyhow::{Context, Result};
 use std::time::Duration;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
 const POLL_INTERVAL_SECS: u64 = 30;
 
@@ -219,7 +220,7 @@ pub fn parse_sources_csv(text: &str) -> Vec<SourceParsed> {
         .collect()
 }
 
-pub async fn run(pool: Pool) {
+pub async fn run(pool: Pool, shutdown: CancellationToken) {
     tracing::info!(
         poll_secs = POLL_INTERVAL_SECS,
         "chrony_reader starting"
@@ -232,7 +233,14 @@ pub async fn run(pool: Pool) {
                 let _ = db::record_error(&pool, "chrony_reader", &e.to_string()).await;
             }
         }
-        tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => {
+                tracing::info!("chrony_reader shutting down");
+                return;
+            }
+            _ = tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)) => {}
+        }
     }
 }
 
