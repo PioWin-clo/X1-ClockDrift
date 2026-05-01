@@ -39,9 +39,8 @@ const I18N = {
     chart_history_title: 'Network drift over time (last 7 days, 5-minute buckets)',
     chart_history_median: 'X1 median drift',
     chart_history_stake: 'X1 stake-weighted',
-    chart_history_sentinel: 'Sentinel offset (µs)',
-    chart_axis_drift_ms: 'X1 drift (ms)',
-    chart_axis_offset_us: 'Sentinel offset (µs)',
+    chart_history_sentinel: 'Sentinel offset (ms)',
+    chart_axis_drift_ms: 'drift (ms)',
     chart_histogram_title: 'Validator drift distribution (all tracked)',
     foundation_trend_title: 'X1 Labs foundation drift trend (14 days)',
     foundation_trend_help: 'Tracks the 12-node X1 Labs foundation cluster drift over time. Sudden shifts (>100 ms in one bucket) indicate X1 Labs changed Tachyon configuration, NTP source, or deployed an update.',
@@ -166,9 +165,8 @@ const I18N = {
     chart_history_title: 'Dryf sieci w czasie (ostatnie 7 dni, kubełki 5-minutowe)',
     chart_history_median: 'Mediana X1',
     chart_history_stake: 'X1 ważone stakiem',
-    chart_history_sentinel: 'Odchylenie Sentinela (µs)',
-    chart_axis_drift_ms: 'Dryf X1 (ms)',
-    chart_axis_offset_us: 'Odchylenie Sentinela (µs)',
+    chart_history_sentinel: 'Odchylenie Sentinela (ms)',
+    chart_axis_drift_ms: 'dryf (ms)',
     chart_histogram_title: 'Rozkład dryfu walidatorów (wszyscy śledzeni)',
     foundation_trend_title: 'Trend dryfu fundacji X1 Labs (14 dni)',
     foundation_trend_help: 'Śledzi dryf klastra 12 nodów fundacji w czasie. Nagłe skoki (>100 ms w jednym kubełku) oznaczają że X1 Labs zmieniło konfigurację Tachyona, źródło NTP, lub wdrożyło aktualizację.',
@@ -581,11 +579,20 @@ function renderHistoryChart() {
   const labels = data.map((d) => d.bucket_iso);
   const median = data.map((d) => d.median_drift_ms);
   const stakeW = data.map((d) => d.stake_weighted_drift_ms);
-  const sentinel = data.map((d) => d.sentinel_offset_us);
+  // v0.5.1: Sentinel offset rendered on the SAME ms scale as X1 drift
+  // (was µs on a separate right axis, which visually exaggerated ~25 µs
+  // RMS oscillations to compete with -1600..+400 ms X1 drift). The whole
+  // point of this dashboard is "Sentinel stable, X1 chaotic" — Sentinel
+  // should look like a flat line near 0 against the X1 series, not its
+  // own dedicated waveform.
+  const sentinel = data.map((d) =>
+    d.sentinel_offset_us != null ? d.sentinel_offset_us / 1000 : null,
+  );
+  const sentinelLabel = t.chart_history_sentinel;
   const datasets = [
     { label: t.chart_history_median, data: median, borderColor: '#58a6ff', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yLeft' },
     { label: t.chart_history_stake, data: stakeW, borderColor: '#3fb950', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yLeft' },
-    { label: t.chart_history_sentinel, data: sentinel, borderColor: '#d29922', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yRight', spanGaps: true },
+    { label: sentinelLabel, data: sentinel, borderColor: '#d29922', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yLeft', spanGaps: true },
   ];
   if (chartHistory) chartHistory.destroy();
   chartHistory = new Chart(ctx, {
@@ -596,12 +603,24 @@ function renderHistoryChart() {
       maintainAspectRatio: false,
       plugins: {
         legend: { labels: { color: '#c9d1d9' } },
-        tooltip: { mode: 'index', intersect: false },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            label: (item) => {
+              const v = item.parsed.y;
+              if (v == null) return null;
+              // Sentinel offset is ~µs-scale even after the ÷1000;
+              // 3 decimals lets it stay legible alongside X1 ms values.
+              const decimals = item.dataset.label === sentinelLabel ? 3 : 1;
+              return `${item.dataset.label}: ${v.toFixed(decimals)} ms`;
+            },
+          },
+        },
       },
       scales: {
         x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
         yLeft: { type: 'linear', position: 'left', ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, title: { display: true, text: t.chart_axis_drift_ms, color: '#8b949e' } },
-        yRight: { type: 'linear', position: 'right', ticks: { color: '#d29922' }, grid: { drawOnChartArea: false }, title: { display: true, text: t.chart_axis_offset_us, color: '#d29922' } },
       },
     },
   });
