@@ -42,7 +42,21 @@ const I18N = {
     chart_history_sentinel: 'Sentinel offset (µs)',
     chart_axis_drift_ms: 'X1 drift (ms)',
     chart_axis_offset_us: 'Sentinel offset (µs)',
-    chart_histogram_title: 'Validator drift distribution (mean drift, top 500)',
+    chart_histogram_title: 'Validator drift distribution (all tracked)',
+    foundation_trend_title: 'X1 Labs foundation drift trend (14 days)',
+    foundation_trend_help: 'Tracks the 12-node X1 Labs foundation cluster drift over time. Sudden shifts (>100 ms in one bucket) indicate X1 Labs changed Tachyon configuration, NTP source, or deployed an update.',
+    foundation_current_drift: 'Current avg drift',
+    foundation_drift_change_7d: 'Change vs 7d ago',
+    foundation_active_nodes: 'Active foundation nodes',
+    foundation_alert_label: '⚠️ Recent change detected',
+    foundation_trend_avg: 'avg drift',
+    foundation_trend_min: 'min',
+    foundation_trend_max: 'max',
+    top_worst_subtitle: 'Validators with drift ≥500ms · ≥100 XNT stake · ≥20 samples',
+    top_best_subtitle: '≥100 samples · ≥1000 XNT · |drift|<5s · foundation excluded',
+    severity_critical: 'critical',
+    severity_high: 'high',
+    severity_medium: 'medium',
 
     worst_table_title: 'Top worst validators',
     worst_table_help: 'Sorted by absolute drift (worst first). Foundation nodes flagged but appear in their natural position.',
@@ -155,7 +169,21 @@ const I18N = {
     chart_history_sentinel: 'Odchylenie Sentinela (µs)',
     chart_axis_drift_ms: 'Dryf X1 (ms)',
     chart_axis_offset_us: 'Odchylenie Sentinela (µs)',
-    chart_histogram_title: 'Rozkład dryfu walidatorów (średni dryf, top 500)',
+    chart_histogram_title: 'Rozkład dryfu walidatorów (wszyscy śledzeni)',
+    foundation_trend_title: 'Trend dryfu fundacji X1 Labs (14 dni)',
+    foundation_trend_help: 'Śledzi dryf klastra 12 nodów fundacji w czasie. Nagłe skoki (>100 ms w jednym kubełku) oznaczają że X1 Labs zmieniło konfigurację Tachyona, źródło NTP, lub wdrożyło aktualizację.',
+    foundation_current_drift: 'Aktualny średni dryf',
+    foundation_drift_change_7d: 'Zmiana vs 7 dni temu',
+    foundation_active_nodes: 'Aktywne nody fundacji',
+    foundation_alert_label: '⚠️ Wykryto niedawną zmianę',
+    foundation_trend_avg: 'średni dryf',
+    foundation_trend_min: 'min',
+    foundation_trend_max: 'max',
+    top_worst_subtitle: 'Walidatorzy z dryfem ≥500ms · ≥100 XNT stake · ≥20 próbek',
+    top_best_subtitle: '≥100 próbek · ≥1000 XNT · |dryf|<5s · bez fundacji',
+    severity_critical: 'krytyczny',
+    severity_high: 'wysoki',
+    severity_medium: 'średni',
 
     worst_table_title: 'Najgorsze walidatory',
     worst_table_help: 'Sortowanie po bezwzględnej wartości dryfu (najgorsze najpierw). Walidatory fundacji oznaczone, ale widoczne w naturalnej kolejności.',
@@ -248,7 +276,9 @@ const state = {
   history: [],
   meta: null,
   best: [],
+  worst: [],                  // v0.5.0: server-side filtered worst ranking
   foundation: [],
+  foundationTrend: [],        // v0.5.0: 14-day foundation drift trend
   chrony: null,
   filtered: [],
   page: 0,
@@ -356,21 +386,26 @@ function setLanguage(lang) {
 
 async function loadAll() {
   try {
-    const [summary, validators, history, meta, best, foundation, chrony] = await Promise.all([
-      fetchJSON('data/summary.json'),
-      fetchJSON('data/validators.json'),
-      fetchJSON('data/history.json'),
-      fetchJSON('data/meta.json'),
-      fetchJSONOptional('data/best_validators.json'),
-      fetchJSONOptional('data/foundation.json'),
-      fetchJSONOptional('data/chrony.json'),
-    ]);
+    const [summary, validators, history, meta, best, worst, foundation, foundationTrend, chrony] =
+      await Promise.all([
+        fetchJSON('data/summary.json'),
+        fetchJSON('data/validators.json'),
+        fetchJSON('data/history.json'),
+        fetchJSON('data/meta.json'),
+        fetchJSONOptional('data/best_validators.json'),
+        fetchJSONOptional('data/worst_validators.json'),
+        fetchJSONOptional('data/foundation.json'),
+        fetchJSONOptional('data/foundation_drift_trend.json'),
+        fetchJSONOptional('data/chrony.json'),
+      ]);
     state.summary = summary;
     state.validators = validators || [];
     state.history = history || [];
     state.meta = meta;
     state.best = best || [];
+    state.worst = worst || [];
     state.foundation = foundation || [];
+    state.foundationTrend = foundationTrend || [];
     state.chrony = chrony;
     renderAll();
   } catch (e) {
@@ -409,6 +444,7 @@ function renderAll() {
   renderHero2();
   renderClock();
   renderHistoryChart();
+  renderFoundationTrend();    // v0.5.0
   applyWorstFilter();
   renderWorstTable();
   renderBestSynced();
@@ -568,6 +604,124 @@ function renderHistoryChart() {
         yRight: { type: 'linear', position: 'right', ticks: { color: '#d29922' }, grid: { drawOnChartArea: false }, title: { display: true, text: t.chart_axis_offset_us, color: '#d29922' } },
       },
     },
+  });
+}
+
+/// v0.5.0: 14-day foundation drift trend chart. Three datasets:
+///   * avg drift (solid blue line, primary metric)
+///   * min drift (light green, lower envelope)
+///   * max drift (light red, upper envelope, fills to min for shaded band)
+/// Plus stat-cards: current, 7d-ago delta, active node count, alert if
+/// any 1h bucket jumped >100ms vs the previous bucket.
+const FOUNDATION_JUMP_THRESHOLD_MS = 100;
+let chartFoundationTrend = null;
+
+function renderFoundationTrend() {
+  const sectionEl = document.getElementById('foundation-trend-section');
+  const data = state.foundationTrend || [];
+  if (data.length === 0) {
+    if (sectionEl) sectionEl.style.display = 'none';
+    return;
+  }
+  if (sectionEl) sectionEl.style.display = '';
+
+  const t = I18N[state.lang];
+  const last = data[data.length - 1];
+
+  document.getElementById('foundation-current-drift').textContent =
+    formatMsRaw(last.avg_drift_ms) + ' ms';
+  document.getElementById('foundation-active-nodes').textContent =
+    `${last.nodes_active} / 12`;
+
+  // 7d-ago bucket: nearest entry whose bucket_ms is within ±1h of target.
+  const sevenDaysAgoTarget = last.bucket_ms - 7 * 86400 * 1000;
+  let sevenDaysAgo = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (const b of data) {
+    const delta = Math.abs(b.bucket_ms - sevenDaysAgoTarget);
+    if (delta < bestDelta && delta <= 3600 * 1000) {
+      bestDelta = delta;
+      sevenDaysAgo = b;
+    }
+  }
+  const changeEl = document.getElementById('foundation-drift-change-7d');
+  if (sevenDaysAgo) {
+    const change = last.avg_drift_ms - sevenDaysAgo.avg_drift_ms;
+    const sign = change >= 0 ? '+' : '−';
+    changeEl.textContent = `${sign}${Math.abs(change).toFixed(0)} ms`;
+    changeEl.classList.toggle('stat-warning', Math.abs(change) > FOUNDATION_JUMP_THRESHOLD_MS);
+  } else {
+    changeEl.textContent = '—';
+    changeEl.classList.remove('stat-warning');
+  }
+
+  // Alert: largest single-bucket jump > threshold.
+  let alert = null;
+  for (let i = 1; i < data.length; i++) {
+    const jump = Math.abs(data[i].avg_drift_ms - data[i - 1].avg_drift_ms);
+    if (jump > FOUNDATION_JUMP_THRESHOLD_MS) {
+      if (!alert || jump > alert.jump) {
+        alert = {
+          bucket_ms: data[i].bucket_ms,
+          jump,
+          prev: data[i - 1].avg_drift_ms,
+          curr: data[i].avg_drift_ms,
+        };
+      }
+    }
+  }
+  const alertCard = document.getElementById('foundation-alert-card');
+  const alertVal = document.getElementById('foundation-alert-value');
+  if (alert) {
+    alertCard.hidden = false;
+    const ts = new Date(alert.bucket_ms).toISOString().slice(0, 16).replace('T', ' ');
+    alertVal.textContent =
+      `${ts}Z: ${alert.prev.toFixed(0)} → ${alert.curr.toFixed(0)} ms (Δ${alert.jump.toFixed(0)} ms)`;
+  } else {
+    alertCard.hidden = true;
+  }
+
+  const ctx = document.getElementById('chart-foundation-trend');
+  if (!ctx || !window.Chart) return;
+  if (chartFoundationTrend) chartFoundationTrend.destroy();
+  chartFoundationTrend = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.map((d) => new Date(d.bucket_ms).toISOString().slice(0, 16).replace('T', ' ')),
+      datasets: [
+        {
+          label: t.foundation_trend_max,
+          data: data.map((d) => d.max_drift_ms),
+          borderColor: 'rgba(248, 81, 73, 0.4)',
+          backgroundColor: 'rgba(248, 81, 73, 0.05)',
+          fill: '+1',
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 1,
+        },
+        {
+          label: t.foundation_trend_min,
+          data: data.map((d) => d.min_drift_ms),
+          borderColor: 'rgba(63, 185, 80, 0.4)',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 1,
+        },
+        {
+          label: t.foundation_trend_avg,
+          data: data.map((d) => d.avg_drift_ms),
+          borderColor: '#58a6ff',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+        },
+      ],
+    },
+    options: chartCommonOpts({ yLabel: 'drift (ms)' }),
   });
 }
 
@@ -775,12 +929,19 @@ function bestSyncedColor(ms) {
   return 'best-neutral';
 }
 
+/// v0.5.0: source data is now `state.worst` (server-side filtered top
+/// worst from `worst_validators.json`), not the full `state.validators`.
+/// Frontend filters: search by pubkey, severity dropdown, hide-foundation
+/// + capybara-only toggles.
 function applyWorstFilter() {
   const q = state.query;
   const sevFilter = state.severityFilter;
-  const base = visibleValidators();
-  state.filtered = base.filter((v) => {
-    if (q && !v.pubkey.toLowerCase().includes(q)) return false;
+  state.filtered = (state.worst || []).filter((v) => {
+    if (state.hideFoundation && v.is_foundation) return false;
+    // Capybara qualifying = stake >= 1000 XNT (10^12 lamports)
+    if (state.capybaraOnly && (v.stake_lamports || 0) < 1_000_000_000_000) return false;
+    const pubkey = v.vote_account || v.pubkey || '';
+    if (q && !pubkey.toLowerCase().includes(q)) return false;
     if (sevFilter === 'critical' && v.severity !== 'critical') return false;
     if (sevFilter === 'high' && v.severity !== 'critical' && v.severity !== 'high') return false;
     return true;
@@ -798,6 +959,9 @@ function sortFiltered() {
     } else if (key === 'severity') {
       const order = { critical: 4, high: 3, foundation: 2, healthy: 1 };
       av = order[a.severity] || 0; bv = order[b.severity] || 0;
+    } else if (key === 'pubkey') {
+      // v0.5.0: worst entries use `vote_account`; validators use `pubkey`.
+      av = a.vote_account || a.pubkey || ''; bv = b.vote_account || b.pubkey || '';
     } else {
       av = a[key]; bv = b[key];
     }
@@ -817,9 +981,14 @@ function renderWorstTable() {
     // by the 🏛️ badge in the severity cell, not by background colour, so
     // an X1 Labs node with critical drift goes red — same as any other.
     tr.classList.add(`row-${v.severity || 'unknown'}`);
+    // v0.5.0: source data is `worst_validators.json` which uses
+    // `vote_account` as the pubkey field; modal/click handlers look
+    // for `.pubkey`, so normalize here.
+    const pubkey = v.vote_account || v.pubkey;
+    const modalData = { ...v, pubkey };
     tr.appendChild(td(String(start + i + 1)));
     tr.appendChild(severityCell(v));
-    tr.appendChild(pubkeyCell(v.pubkey, v));
+    tr.appendChild(pubkeyCell(pubkey, modalData));
     tr.appendChild(driftTd(v.mean_drift_ms));
     tr.appendChild(td(formatMsRaw(v.stddev_drift_ms), { num: true }));
     tr.appendChild(td(formatInt(v.n_samples), { num: true }));

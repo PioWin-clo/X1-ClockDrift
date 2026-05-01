@@ -123,12 +123,39 @@
     </div>
   </section>
 
+  <!-- ===== v0.5.0: Foundation drift trend (14d/1h) ===== -->
+  <section class="foundation-trend-section" id="foundation-trend-section">
+    <div class="section-title" data-i18n="foundation_trend_title">X1 Labs foundation drift trend (14 days)</div>
+    <div class="section-help" data-i18n="foundation_trend_help">Tracks the 12-node X1 Labs foundation cluster drift over time. Sudden shifts (&gt;100 ms in one bucket) indicate X1 Labs changed Tachyon configuration, NTP source, or deployed an update.</div>
+    <div class="foundation-trend-stats">
+      <div class="stat-card">
+        <span class="stat-label" data-i18n="foundation_current_drift">Current avg drift</span>
+        <span class="stat-value mono" id="foundation-current-drift">—</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label" data-i18n="foundation_drift_change_7d">Change vs 7d ago</span>
+        <span class="stat-value mono" id="foundation-drift-change-7d">—</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label" data-i18n="foundation_active_nodes">Active foundation nodes</span>
+        <span class="stat-value mono" id="foundation-active-nodes">—</span>
+      </div>
+      <div class="stat-card stat-alert" id="foundation-alert-card" hidden>
+        <span class="stat-label" data-i18n="foundation_alert_label">⚠️ Recent change detected</span>
+        <span class="stat-value mono" id="foundation-alert-value">—</span>
+      </div>
+    </div>
+    <div class="chart-frame">
+      <canvas id="chart-foundation-trend"></canvas>
+    </div>
+  </section>
+
   <!-- ===== TOP WORST VALIDATORS ===== -->
   <section class="worst-block">
     <div class="ranking-head">
       <div>
         <div class="ranking-title" data-i18n="worst_table_title">Top worst validators</div>
-        <div class="section-help" data-i18n="worst_table_help">Sorted by absolute drift (worst first). Foundation nodes flagged but appear in their natural position.</div>
+        <div class="section-help" data-i18n="top_worst_subtitle">Validators with drift ≥500ms · ≥100 XNT stake · ≥20 samples</div>
       </div>
       <div class="ranking-controls">
         <select id="severity-filter" class="severity-filter">
@@ -166,7 +193,7 @@
   <section class="best-synced-section">
     <div class="best-synced-header">
       <div class="section-title" data-i18n="best_synced_title">Best synchronized validators (top 10)</div>
-      <div class="section-help" data-i18n="best_synced_help_v04">Validators with the smallest absolute drift. Min 1000 XNT stake (Capybara threshold), min 100 samples, foundation excluded.</div>
+      <div class="section-help" data-i18n="top_best_subtitle">≥100 samples · ≥1000 XNT · |drift|&lt;5s · foundation excluded</div>
     </div>
     <div class="table-wrap">
       <table class="best-synced-table">
@@ -216,7 +243,7 @@
       </summary>
 
       <div class="chart-block">
-        <div class="chart-title" data-i18n="chart_histogram_title">Validator drift distribution (mean drift, top 500)</div>
+        <div class="chart-title" data-i18n="chart_histogram_title">Validator drift distribution (all tracked)</div>
         <div class="chart-frame">
           <canvas id="chart-histogram"></canvas>
         </div>

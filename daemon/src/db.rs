@@ -1042,6 +1042,9 @@ pub async fn get_best_synced_validators(
     min_samples: i64,
     min_stake_lamports: i64,
 ) -> Result<Vec<ValidatorSummary>> {
+    // v0.5.0: defensive `ABS(mean_drift_ms) < 5000` filter — a validator
+    // with 1000+ XNT and 100+ samples but |drift| ≥ 5 s is pathological
+    // and shouldn't appear in "best synced" regardless of sort position.
     let rows = sqlx::query(
         "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
                 p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
@@ -1051,6 +1054,7 @@ pub async fn get_best_synced_validators(
          WHERE n_samples >= ?1 \
            AND last_stake_lamports >= ?2 \
            AND is_foundation = 0 \
+           AND ABS(mean_drift_ms) < 5000 \
          ORDER BY ABS(mean_drift_ms) ASC \
          LIMIT ?3",
     )
@@ -1184,6 +1188,178 @@ pub async fn backfill_history(pool: &Pool, lookback_secs: i64) -> Result<usize> 
         count += 1;
     }
     Ok(count)
+}
+
+/// "Top worst" ranking: validators causing real operational concern.
+/// Filters out spam/test validators (n<20 samples, <100 XNT stake) and
+/// near-baseline drift (|mean| <500 ms). Sorted by absolute drift DESC
+/// so the worst clocks lead. Replaces v0.4.x client-side sort.
+pub async fn get_worst_validators(
+    pool: &Pool,
+    limit: i64,
+    min_samples: i64,
+    min_stake_lamports: i64,
+    min_abs_drift_ms: f64,
+) -> Result<Vec<ValidatorSummary>> {
+    let rows = sqlx::query(
+        "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                cluster_id, cluster_size, is_multi_node, \
+                is_foundation, foundation_label, severity \
+         FROM validator_drift_summary \
+         WHERE n_samples >= ?1 \
+           AND last_stake_lamports >= ?2 \
+           AND ABS(mean_drift_ms) >= ?3 \
+         ORDER BY ABS(mean_drift_ms) DESC \
+         LIMIT ?4",
+    )
+    .bind(min_samples)
+    .bind(min_stake_lamports)
+    .bind(min_abs_drift_ms)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        out.push(ValidatorSummary {
+            validator: r.try_get("validator")?,
+            n_samples: r.try_get("n_samples")?,
+            mean_drift_ms: r.try_get("mean_drift_ms")?,
+            median_drift_ms: r.try_get("median_drift_ms")?,
+            stddev_drift_ms: r.try_get("stddev_drift_ms")?,
+            p10_drift_ms: r.try_get("p10_drift_ms")?,
+            p90_drift_ms: r.try_get("p90_drift_ms")?,
+            last_seen_slot: r.try_get("last_seen_slot")?,
+            last_stake_lamports: r.try_get("last_stake_lamports")?,
+            updated_at: r.try_get("updated_at")?,
+            cluster_id: r.try_get::<Option<i64>, _>("cluster_id").unwrap_or(None),
+            cluster_size: r.try_get("cluster_size").unwrap_or(1),
+            is_multi_node: r.try_get::<i64, _>("is_multi_node").unwrap_or(0) != 0,
+            is_foundation: r.try_get::<i64, _>("is_foundation").unwrap_or(0) != 0,
+            foundation_label: r.try_get::<Option<String>, _>("foundation_label").unwrap_or(None),
+            severity: r.try_get::<Option<String>, _>("severity").unwrap_or(None),
+        });
+    }
+    Ok(out)
+}
+
+/// One time-bucketed slice of foundation cluster drift over time.
+/// `bucket_ts_secs` is unix-second time of bucket start (frontend
+/// converts to ms for `Date()`). Stddev computed in Rust over raw
+/// samples — SQLite has no native stddev, and the alternative subquery
+/// shape is "gnarly".
+#[derive(Debug, Clone)]
+pub struct FoundationDriftBucket {
+    pub bucket_ts_secs: i64,
+    pub avg_drift_ms: f64,
+    pub min_drift_ms: f64,
+    pub max_drift_ms: f64,
+    pub stddev_drift_ms: f64,
+    pub nodes_active: i64,
+    pub n_samples: i64,
+}
+
+/// Time-bucketed drift trend across X1 Labs Foundation validators.
+/// Returns one bucket per `bucket_minutes` interval going back `days`
+/// days. Bucket aggregates: avg/min/max/stddev of drift, count of
+/// distinct foundation nodes contributing, total sample count.
+///
+/// SQL fetches raw `(ts_local_us, validator, drift_ms)` rows for the
+/// foundation set and time window; the Rust side groups them into
+/// buckets and computes statistics. For 12 nodes × 14 days × ~600 RPC
+/// samples/day this is at most ~100k rows — trivially fast in Rust.
+pub async fn get_foundation_drift_history(
+    pool: &Pool,
+    days: u32,
+    bucket_minutes: u32,
+) -> Result<Vec<FoundationDriftBucket>> {
+    use std::collections::BTreeMap;
+
+    let cutoff_us = (chrono::Utc::now().timestamp() - (days as i64) * 86400) * 1_000_000;
+    let bucket_secs = (bucket_minutes as i64).max(1) * 60;
+
+    let rows = sqlx::query(
+        "SELECT s.ts_local_us AS ts_local_us, \
+                v.validator AS validator, \
+                (CAST(v.ts_chain AS REAL) * 1000.0) - (CAST(s.ts_local_us AS REAL) / 1000.0) AS drift_ms \
+         FROM vote_records v \
+         JOIN slot_obs s ON s.slot = v.slot \
+         WHERE v.validator IN (SELECT validator FROM validator_drift_summary WHERE is_foundation = 1) \
+           AND s.ts_local_us >= ?1 \
+         ORDER BY s.ts_local_us ASC",
+    )
+    .bind(cutoff_us)
+    .fetch_all(pool)
+    .await?;
+
+    let mut buckets: BTreeMap<i64, BucketAccum> = BTreeMap::new();
+    for r in rows {
+        let ts_us: i64 = r.try_get("ts_local_us")?;
+        let validator: String = r.try_get("validator")?;
+        let drift: f64 = r.try_get("drift_ms")?;
+        let bucket_ts = (ts_us / 1_000_000 / bucket_secs) * bucket_secs;
+        buckets.entry(bucket_ts).or_default().add(validator, drift);
+    }
+
+    let mut out: Vec<FoundationDriftBucket> = buckets
+        .into_iter()
+        .map(|(bucket_ts_secs, acc)| FoundationDriftBucket {
+            bucket_ts_secs,
+            avg_drift_ms: acc.mean(),
+            min_drift_ms: acc.min(),
+            max_drift_ms: acc.max(),
+            stddev_drift_ms: acc.stddev(),
+            nodes_active: acc.nodes.len() as i64,
+            n_samples: acc.values.len() as i64,
+        })
+        .collect();
+    out.sort_by_key(|b| b.bucket_ts_secs);
+    Ok(out)
+}
+
+/// Per-bucket accumulator for foundation drift trend computation.
+#[derive(Default)]
+struct BucketAccum {
+    values: Vec<f64>,
+    nodes: std::collections::HashSet<String>,
+}
+
+impl BucketAccum {
+    fn add(&mut self, validator: String, drift: f64) {
+        self.values.push(drift);
+        self.nodes.insert(validator);
+    }
+    fn mean(&self) -> f64 {
+        if self.values.is_empty() {
+            0.0
+        } else {
+            self.values.iter().sum::<f64>() / self.values.len() as f64
+        }
+    }
+    fn min(&self) -> f64 {
+        self.values.iter().copied().fold(f64::INFINITY, f64::min)
+    }
+    fn max(&self) -> f64 {
+        self.values
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max)
+    }
+    fn stddev(&self) -> f64 {
+        let n = self.values.len();
+        if n < 2 {
+            return 0.0;
+        }
+        let m = self.mean();
+        let var = self
+            .values
+            .iter()
+            .map(|v| (v - m).powi(2))
+            .sum::<f64>()
+            / (n as f64 - 1.0);
+        var.sqrt()
+    }
 }
 
 pub async fn cleanup_old(pool: &Pool, retention_days: u32, history_retention_days: u32) -> Result<()> {
@@ -1775,12 +1951,16 @@ mod tests {
         }
 
         // min_stake=400_000_000 — only TINY_DRIFT_HIGH_N (500M), MEDIUM_DRIFT (400M),
-        // BIG_DRIFT_HIGH_N (1B) qualify (foundation still excluded).
+        // BIG_DRIFT_HIGH_N (1B) qualify by stake (foundation still excluded).
+        // v0.5.0: BIG_DRIFT_HIGH_N (mean=5000) now also fails ABS(mean) < 5000 filter.
         let with_min_stake = get_best_synced_validators(&pool, 10, 5, 400_000_000).await.unwrap();
         let pubkeys: Vec<&str> = with_min_stake.iter().map(|v| v.validator.as_str()).collect();
         assert!(pubkeys.contains(&"TINY_DRIFT_HIGH_N"));
         assert!(pubkeys.contains(&"MEDIUM_DRIFT"));
-        assert!(pubkeys.contains(&"BIG_DRIFT_HIGH_N"));
+        assert!(
+            !pubkeys.contains(&"BIG_DRIFT_HIGH_N"),
+            "BIG_DRIFT_HIGH_N (|drift|=5000) should be filtered by v0.5.0 abs<5000 check"
+        );
         assert!(!pubkeys.contains(&"ZERO_DRIFT"), "ZERO_DRIFT (200M stake) should be filtered");
 
         // limit=1 honoured
@@ -2011,6 +2191,217 @@ mod tests {
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// v0.5.0: explicit guard for the spec'd best-synced filters
+    /// (n_samples >= 100, stake >= 1000 XNT, foundation excluded,
+    /// |drift| < 5000 ms). Each rejection reason has a synthetic row.
+    #[tokio::test]
+    async fn test_best_synced_excludes_low_stake_and_pathological_drift() {
+        let pool = init(":memory:").await.unwrap();
+        let now = chrono::Utc::now().timestamp();
+
+        // (validator, n_samples, mean_drift_ms, stake_lamports, is_foundation)
+        let rows = [
+            // Rejected: n=43 < 100, stake=2 XNT < 1000 XNT
+            ("AVfG_low_stake_low_n", 43i64, 0.3, 2_000_000_000i64, 0i64),
+            // Accepted: meets all v0.5.0 thresholds
+            ("Real_high_stake", 200, 50.0, 1_500_000_000_000, 0),
+            // Rejected: foundation, even with great drift
+            ("Foundation_node", 500, 1.0, 55_000_000_000_000, 1),
+            // Rejected: |drift|=8000 >= 5000 (pathological)
+            ("Pathological_drift", 200, 8000.0, 5_000_000_000_000, 0),
+        ];
+        for (v, n, mean, stake, is_foundation) in rows.iter() {
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                  is_foundation) \
+                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5, ?6)",
+            )
+            .bind(*v)
+            .bind(*n)
+            .bind(*mean)
+            .bind(*stake)
+            .bind(now)
+            .bind(*is_foundation)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let best =
+            get_best_synced_validators(&pool, 10, 100, 1_000 * 1_000_000_000)
+                .await
+                .unwrap();
+
+        assert_eq!(best.len(), 1, "only Real_high_stake should pass all v0.5.0 filters");
+        assert_eq!(best[0].validator, "Real_high_stake");
+    }
+
+    /// v0.5.0: server-side worst-validators query filters spam (n<20),
+    /// tiny-stake (<100 XNT), and near-baseline drift (|drift|<500 ms).
+    #[tokio::test]
+    async fn test_worst_validators_filters_noise() {
+        let pool = init(":memory:").await.unwrap();
+        let now = chrono::Utc::now().timestamp();
+
+        // (validator, n_samples, mean_drift_ms, stake_lamports)
+        let rows = [
+            // Rejected: n=5 < 20 AND stake=1 XNT < 100 XNT
+            ("tiny_spam", 5i64, 50_000.0, 1_000_000_000i64),
+            // Accepted: -23s on a real validator
+            ("real_outlier_a", 100, -23_000.0, 100_000_000_000_000),
+            // Accepted: +11s on a real validator
+            ("real_outlier_b", 100, 11_000.0, 110_000_000_000_000),
+            // Rejected: |drift|=100 < 500 (healthy)
+            ("healthy", 100, 100.0, 50_000_000_000_000),
+            // Accepted: |drift|=800 ≥ 500 with 50k XNT
+            ("moderate", 50, 800.0, 50_000_000_000_000),
+        ];
+        for (v, n, mean, stake) in rows.iter() {
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
+                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5)",
+            )
+            .bind(*v)
+            .bind(*n)
+            .bind(*mean)
+            .bind(*stake)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let results =
+            get_worst_validators(&pool, 30, 20, 100 * 1_000_000_000, 500.0)
+                .await
+                .unwrap();
+
+        assert_eq!(results.len(), 3, "expected 3 entries (filtered tiny_spam, healthy)");
+        // ABS(drift) DESC: 23000, 11000, 800
+        assert_eq!(results[0].validator, "real_outlier_a");
+        assert_eq!(results[1].validator, "real_outlier_b");
+        assert_eq!(results[2].validator, "moderate");
+    }
+
+    /// v0.5.0: foundation drift trend bucketing — verifies the JOIN
+    /// filters by is_foundation, buckets by `bucket_minutes`, and
+    /// computes avg/min/max/nodes_active correctly.
+    #[tokio::test]
+    async fn test_foundation_drift_trend_buckets_correctly() {
+        let pool = init(":memory:").await.unwrap();
+        let now_us = chrono::Utc::now().timestamp_micros();
+        let now_s = now_us / 1_000_000;
+
+        // Two foundation validators + one normal validator. Normal must
+        // not appear in any bucket.
+        let f1 = "FOUND_NODE_A_111111111111111111111111111111";
+        let f2 = "FOUND_NODE_B_222222222222222222222222222222";
+        let normal = "NORMAL_VALIDATOR_3333333333333333333333333333";
+        for (pk, is_foundation) in [(f1, 1i64), (f2, 1), (normal, 0)] {
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                  is_foundation) \
+                 VALUES (?1, 10, 0.0, 0.0, 1.0, 0.0, 0.0, 0, 0, ?2, ?3)",
+            )
+            .bind(pk)
+            .bind(now_s)
+            .bind(is_foundation)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Choose two buckets safely separated: 6h ago and now.
+        // A bucket key is `(ts_local_us / 1_000_000 / 3600) * 3600` so
+        // distinct ts_local values 6h apart produce distinct buckets.
+        // For drift = ts_chain*1000 - ts_local_us/1000 to equal target,
+        // pick ts_local_us = ts_chain*1_000_000 - drift*1000.
+        let bucket_a_secs = (now_us - 6 * 3600 * 1_000_000) / 1_000_000;
+        let bucket_b_secs = now_us / 1_000_000;
+
+        let inserts: [(i64, &str, f64, i64); 4] = [
+            (bucket_a_secs, f1, -890.0, 100),
+            (bucket_a_secs, f2, -880.0, 101),
+            (bucket_b_secs, f1, -875.0, 200),
+            (bucket_b_secs, f2, -885.0, 201),
+        ];
+        for (bucket_secs, validator, drift_ms, slot) in inserts.iter() {
+            let ts_chain = *bucket_secs;
+            let ts_local_us = bucket_secs * 1_000_000 - (*drift_ms * 1000.0) as i64;
+            sqlx::query("INSERT INTO slot_obs (slot, ts_local_us) VALUES (?1, ?2)")
+                .bind(*slot)
+                .bind(ts_local_us)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO vote_records (slot, block_slot, validator, ts_chain) \
+                 VALUES (?1, ?2, ?3, ?4)",
+            )
+            .bind(*slot)
+            .bind(*slot + 1)
+            .bind(*validator)
+            .bind(ts_chain)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        // A normal-validator vote in the latest bucket — must NOT appear
+        // in foundation trend.
+        let normal_slot = 300i64;
+        let normal_ts_local = bucket_b_secs * 1_000_000 - (-100.0_f64 * 1000.0) as i64;
+        sqlx::query("INSERT INTO slot_obs (slot, ts_local_us) VALUES (?1, ?2)")
+            .bind(normal_slot)
+            .bind(normal_ts_local)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO vote_records (slot, block_slot, validator, ts_chain) \
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(normal_slot)
+        .bind(normal_slot + 1)
+        .bind(normal)
+        .bind(bucket_b_secs)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let history = get_foundation_drift_history(&pool, 1, 60).await.unwrap();
+        assert!(
+            history.len() >= 2,
+            "expected ≥2 buckets (6h ago + now), got {}",
+            history.len()
+        );
+
+        // Both buckets contain exactly the 2 foundation nodes — normal
+        // validator must not contribute.
+        for bucket in &history {
+            assert_eq!(bucket.nodes_active, 2, "every bucket should have 2 distinct foundation nodes");
+            assert_eq!(bucket.n_samples, 2);
+        }
+
+        // Most recent bucket: drifts -875 and -885 → avg -880, min -885,
+        // max -875. (Allow ±2ms slack for integer rounding in ts_local_us.)
+        let last = history.last().unwrap();
+        assert!(
+            (last.avg_drift_ms - (-880.0)).abs() < 2.0,
+            "expected avg ~-880, got {}",
+            last.avg_drift_ms
+        );
+        assert!((last.min_drift_ms - (-885.0)).abs() < 2.0);
+        assert!((last.max_drift_ms - (-875.0)).abs() < 2.0);
+        // 2 samples → stddev with (n-1) denom = sqrt(((10/2)*2)/1) = sqrt(50) ~ 7.07
+        assert!(last.stddev_drift_ms > 0.0, "stddev should be non-zero with 2 distinct values");
     }
 
     /// v0.4.1: foundation status no longer hides drift severity.

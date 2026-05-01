@@ -6,7 +6,10 @@ use serde::Serialize;
 use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
-const VALIDATORS_TOP_N: usize = 500;
+/// v0.5.0: bumped from 500 to 5000 to cover all ~2,259 active X1
+/// mainnet validators (was excluding ~78% of network). Sort by impact
+/// still puts highest-stake outliers first so the worst clocks lead.
+const VALIDATORS_TOP_N: usize = 5000;
 const BEST_SYNCED_TOP_N: i64 = 10;
 /// v0.4.0: bumped from 5 to 100 — sub-100-sample validators are too noisy
 /// for "best" claims. Foundation excluded inside the SQL.
@@ -16,6 +19,16 @@ const LAMPORTS_PER_XNT: f64 = 1_000_000_000.0;
 /// below this won't qualify for delegation rewards and are filtered out
 /// of the "best synced" ranking.
 const CAPYBARA_THRESHOLD_LAMPORTS: i64 = 1_000 * 1_000_000_000;
+/// v0.5.0: server-side worst-validators ranking. Filters tuned so that
+/// 100-XNT spam validators with single bad samples don't dominate the
+/// list — only validators stable enough to matter operationally.
+const WORST_TOP_N: i64 = 100;
+const WORST_MIN_SAMPLES: i64 = 20;
+const WORST_MIN_STAKE_LAMPORTS: i64 = 100 * 1_000_000_000; // 100 XNT
+const WORST_MIN_ABS_DRIFT_MS: f64 = 500.0;
+/// v0.5.0: foundation drift trend window — 14 days of 1-hour buckets.
+const FOUNDATION_TREND_DAYS: u32 = 14;
+const FOUNDATION_TREND_BUCKET_MINUTES: u32 = 60;
 const HISTORY_BACKFILL_SECS: i64 = 7 * 86400;
 
 pub async fn run(pool: Pool, config: Config, shutdown: CancellationToken) {
@@ -208,6 +221,40 @@ struct FoundationJson {
     n_samples: i64,
     stake_lamports: i64,
     stake_xnt: f64,
+}
+
+/// v0.5.0: server-side worst-validators ranking. Was client-side sort
+/// over `validators.json`; now a dedicated export so frontend doesn't
+/// have to re-sort every page load and filter thresholds are explicit.
+#[derive(Serialize)]
+struct WorstValidatorJson {
+    rank: i64,
+    vote_account: String,
+    n_samples: i64,
+    mean_drift_ms: f64,
+    median_drift_ms: f64,
+    stddev_drift_ms: f64,
+    p10_drift_ms: f64,
+    p90_drift_ms: f64,
+    stake_lamports: i64,
+    stake_xnt: f64,
+    is_foundation: bool,
+    foundation_label: Option<String>,
+    severity: Option<String>,
+}
+
+/// v0.5.0: one bucket of foundation cluster drift over time. Frontend
+/// renders these as a line chart with shaded min/max band.
+/// `bucket_ms` is millisecond unix time (Date()-friendly).
+#[derive(Serialize)]
+struct FoundationDriftBucketJson {
+    bucket_ms: i64,
+    avg_drift_ms: f64,
+    min_drift_ms: f64,
+    max_drift_ms: f64,
+    stddev_drift_ms: f64,
+    nodes_active: i64,
+    n_samples: i64,
 }
 
 #[derive(Serialize)]
@@ -496,6 +543,64 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         })
         .collect();
 
+    // v0.5.0: server-side worst-validators ranking with explicit
+    // thresholds so spammy 1-XNT validators with single noisy samples
+    // can't dominate the dashboard's most prominent table.
+    let worst_rows = db::get_worst_validators(
+        pool,
+        WORST_TOP_N,
+        WORST_MIN_SAMPLES,
+        WORST_MIN_STAKE_LAMPORTS,
+        WORST_MIN_ABS_DRIFT_MS,
+    )
+    .await
+    .unwrap_or_default();
+    let worst_json: Vec<WorstValidatorJson> = worst_rows
+        .into_iter()
+        .enumerate()
+        .map(|(idx, s)| {
+            let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
+            WorstValidatorJson {
+                rank: (idx as i64) + 1,
+                vote_account: s.validator,
+                n_samples: s.n_samples,
+                mean_drift_ms: s.mean_drift_ms,
+                median_drift_ms: s.median_drift_ms,
+                stddev_drift_ms: s.stddev_drift_ms,
+                p10_drift_ms: s.p10_drift_ms,
+                p90_drift_ms: s.p90_drift_ms,
+                stake_lamports: s.last_stake_lamports,
+                stake_xnt,
+                is_foundation: s.is_foundation,
+                foundation_label: s.foundation_label,
+                severity: s.severity,
+            }
+        })
+        .collect();
+
+    // v0.5.0: foundation drift trend — 14 days × 1h buckets for the
+    // 12-node X1 Labs cluster. Lets operators see whether X1 Labs
+    // changed Tachyon config or NTP source by watching for sudden
+    // step changes in the avg drift line.
+    let foundation_trend: Vec<FoundationDriftBucketJson> = db::get_foundation_drift_history(
+        pool,
+        FOUNDATION_TREND_DAYS,
+        FOUNDATION_TREND_BUCKET_MINUTES,
+    )
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|b| FoundationDriftBucketJson {
+        bucket_ms: b.bucket_ts_secs * 1000,
+        avg_drift_ms: b.avg_drift_ms,
+        min_drift_ms: b.min_drift_ms,
+        max_drift_ms: b.max_drift_ms,
+        stddev_drift_ms: b.stddev_drift_ms,
+        nodes_active: b.nodes_active,
+        n_samples: b.n_samples,
+    })
+    .collect();
+
     let chrony_json = build_chrony_json(pool, now_secs).await;
 
     // Per-validator histories: top 500 by impact + top 10 best-synced.
@@ -519,14 +624,22 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
     write_atomic(&data_dir.join("history.json"), &history_json).await?;
     write_atomic(&data_dir.join("meta.json"), &meta).await?;
     write_atomic(&data_dir.join("best_validators.json"), &best_json).await?;
+    write_atomic(&data_dir.join("worst_validators.json"), &worst_json).await?;
     write_atomic(&data_dir.join("chrony.json"), &chrony_json).await?;
     write_atomic(&data_dir.join("foundation.json"), &foundation_json).await?;
+    write_atomic(
+        &data_dir.join("foundation_drift_trend.json"),
+        &foundation_trend,
+    )
+    .await?;
 
     tracing::info!(
         n_validators = summary.n_validators_observed,
         n_samples_24h = summary.n_samples_24h,
         n_best = best_json.len(),
+        n_worst = worst_json.len(),
         n_foundation = foundation_json.len(),
+        n_foundation_trend = foundation_trend.len(),
         chrony_sources = chrony_json.sources.len(),
         n_clusters = summary.n_clusters_detected,
         n_critical = summary.n_critical,
