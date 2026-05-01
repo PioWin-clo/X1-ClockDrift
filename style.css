@@ -788,3 +788,49 @@ table.foundation-table tr:hover td { background: var(--surface-2); }
 .row-high td:not(.severity-cell):not(.pubkey-cell) {
   background-color: rgba(210, 153, 34, 0.03);
 }
+
+/* ===== v0.5.0 — Foundation drift trend section ===== */
+.foundation-trend-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+.foundation-trend-section .chart-frame { height: 320px; margin-top: 12px; }
+
+.foundation-trend-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+@media (max-width: 800px) { .foundation-trend-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .foundation-trend-stats { grid-template-columns: 1fr; } }
+
+.foundation-trend-stats .stat-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.foundation-trend-stats .stat-label {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.foundation-trend-stats .stat-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+.stat-warning { color: var(--warn); }
+.stat-alert {
+  border-color: var(--warn) !important;
+  background: rgba(210, 153, 34, 0.08) !important;
+}
+.stat-alert .stat-value { color: var(--warn); font-size: 12px; }
+.stat-alert[hidden] { display: none !important; }
