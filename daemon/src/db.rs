@@ -1031,20 +1031,24 @@ pub async fn fetch_chrony_sources(pool: &Pool) -> Result<Vec<ChronySource>> {
     Ok(out)
 }
 
-/// Best-synced ranking with v0.4.0 filter changes:
-///   * `min_samples` — minimum measurements (default 100 in exporter, was 5)
-///   * `min_stake_lamports` — filter out tiny "farm" validators that
-///     happen to have low jitter due to extreme self-staking strategies
-///   * Foundation excluded (they have a dedicated showcase section)
+/// Best-synced ranking — v0.6.0 dropped the stake-based business filter.
+///
+/// Filters kept:
+///   * `min_samples` — statistical sufficiency (default 100 in exporter)
+///   * `is_foundation = 0` — Foundation has its own showcase section
+///   * `ABS(mean_drift_ms) < 5000` — defensive: a validator with 100+
+///     samples but |drift| ≥ 5 s is pathological, not "best synced"
+///
+/// Filter removed:
+///   * `last_stake_lamports >= 1000 XNT` — stake doesn't determine clock
+///     quality. A 2-XNT validator with NTP-discipline can have a tighter
+///     clock than a 100k-XNT one. Capybara delegation gating is a
+///     Foundation business decision, out of scope for this dashboard.
 pub async fn get_best_synced_validators(
     pool: &Pool,
     limit: i64,
     min_samples: i64,
-    min_stake_lamports: i64,
 ) -> Result<Vec<ValidatorSummary>> {
-    // v0.5.0: defensive `ABS(mean_drift_ms) < 5000` filter — a validator
-    // with 1000+ XNT and 100+ samples but |drift| ≥ 5 s is pathological
-    // and shouldn't appear in "best synced" regardless of sort position.
     let rows = sqlx::query(
         "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
                 p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
@@ -1052,14 +1056,12 @@ pub async fn get_best_synced_validators(
                 is_foundation, foundation_label, severity \
          FROM validator_drift_summary \
          WHERE n_samples >= ?1 \
-           AND last_stake_lamports >= ?2 \
            AND is_foundation = 0 \
            AND ABS(mean_drift_ms) < 5000 \
          ORDER BY ABS(mean_drift_ms) ASC \
-         LIMIT ?3",
+         LIMIT ?2",
     )
     .bind(min_samples)
-    .bind(min_stake_lamports)
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -1191,14 +1193,22 @@ pub async fn backfill_history(pool: &Pool, lookback_secs: i64) -> Result<usize> 
 }
 
 /// "Top worst" ranking: validators causing real operational concern.
-/// Filters out spam/test validators (n<20 samples, <100 XNT stake) and
-/// near-baseline drift (|mean| <500 ms). Sorted by absolute drift DESC
-/// so the worst clocks lead. Replaces v0.4.x client-side sort.
+/// Filters are STATISTICAL/DEFINITIONAL only — no stake-based business
+/// logic:
+///   * `min_samples >= 20` — statistical significance (less strict than
+///     best synced because operationally we want early signal on real
+///     problems even before 100 samples)
+///   * `ABS(mean_drift_ms) >= min_abs_drift` — definition of "worst"
+///     requires meaningful drift; near-baseline isn't worth flagging
+///
+/// v0.6.0 removed the `min_stake_lamports >= 100 XNT` filter. A 2-XNT
+/// validator with -23s drift is operationally newsworthy: catastrophic
+/// operator misconfig is signal regardless of stake. Frontend offers
+/// an optional client-side stake filter for users who want that lens.
 pub async fn get_worst_validators(
     pool: &Pool,
     limit: i64,
     min_samples: i64,
-    min_stake_lamports: i64,
     min_abs_drift_ms: f64,
 ) -> Result<Vec<ValidatorSummary>> {
     let rows = sqlx::query(
@@ -1208,13 +1218,11 @@ pub async fn get_worst_validators(
                 is_foundation, foundation_label, severity \
          FROM validator_drift_summary \
          WHERE n_samples >= ?1 \
-           AND last_stake_lamports >= ?2 \
-           AND ABS(mean_drift_ms) >= ?3 \
+           AND ABS(mean_drift_ms) >= ?2 \
          ORDER BY ABS(mean_drift_ms) DESC \
-         LIMIT ?4",
+         LIMIT ?3",
     )
     .bind(min_samples)
-    .bind(min_stake_lamports)
     .bind(min_abs_drift_ms)
     .bind(limit)
     .fetch_all(pool)
@@ -1900,8 +1908,9 @@ mod tests {
 
     /// Insert synthetic validator_drift_summary rows and verify
     /// `get_best_synced_validators` orders by absolute mean drift ascending,
-    /// applies the min_samples + min_stake filters, excludes foundation,
-    /// and respects the limit. Updated for v0.4.0 signature.
+    /// applies the min_samples filter, excludes foundation, applies the
+    /// `ABS(drift) < 5000` defensive filter, and respects the limit.
+    /// Updated for v0.6.0 signature (no min_stake_lamports).
     #[tokio::test]
     async fn get_best_synced_orders_and_filters() {
         let pool = init(":memory:").await.unwrap();
@@ -1937,10 +1946,11 @@ mod tests {
             .unwrap();
         }
 
-        // min_samples=5, min_stake=0 — TINY_DRIFT_LOW_N (n=3) excluded,
-        // FOUNDATION_NODE excluded by is_foundation filter.
+        // min_samples=5 — TINY_DRIFT_LOW_N (n=3) excluded,
+        // FOUNDATION_NODE excluded by is_foundation filter,
+        // BIG_DRIFT_HIGH_N excluded by |drift| < 5000 (mean is exactly 5000).
         // Top 3 by |mean|: ZERO_DRIFT (0), TINY_DRIFT_HIGH_N (1.2), NEGATIVE_TINY (2.4).
-        let best = get_best_synced_validators(&pool, 3, 5, 0).await.unwrap();
+        let best = get_best_synced_validators(&pool, 3, 5).await.unwrap();
         assert_eq!(best.len(), 3);
         assert_eq!(best[0].validator, "ZERO_DRIFT");
         assert_eq!(best[1].validator, "TINY_DRIFT_HIGH_N");
@@ -1949,27 +1959,21 @@ mod tests {
         for v in &best {
             assert_ne!(v.validator, "FOUNDATION_NODE");
         }
-
-        // min_stake=400_000_000 — only TINY_DRIFT_HIGH_N (500M), MEDIUM_DRIFT (400M),
-        // BIG_DRIFT_HIGH_N (1B) qualify by stake (foundation still excluded).
-        // v0.5.0: BIG_DRIFT_HIGH_N (mean=5000) now also fails ABS(mean) < 5000 filter.
-        let with_min_stake = get_best_synced_validators(&pool, 10, 5, 400_000_000).await.unwrap();
-        let pubkeys: Vec<&str> = with_min_stake.iter().map(|v| v.validator.as_str()).collect();
-        assert!(pubkeys.contains(&"TINY_DRIFT_HIGH_N"));
-        assert!(pubkeys.contains(&"MEDIUM_DRIFT"));
+        // BIG_DRIFT_HIGH_N must be filtered by abs<5000 even though it has 100 samples.
+        let all_qualifying = get_best_synced_validators(&pool, 100, 5).await.unwrap();
+        let pubkeys: Vec<&str> = all_qualifying.iter().map(|v| v.validator.as_str()).collect();
         assert!(
             !pubkeys.contains(&"BIG_DRIFT_HIGH_N"),
-            "BIG_DRIFT_HIGH_N (|drift|=5000) should be filtered by v0.5.0 abs<5000 check"
+            "BIG_DRIFT_HIGH_N (|drift|=5000) should be filtered by abs<5000 check"
         );
-        assert!(!pubkeys.contains(&"ZERO_DRIFT"), "ZERO_DRIFT (200M stake) should be filtered");
 
         // limit=1 honoured
-        let best_limit_1 = get_best_synced_validators(&pool, 1, 5, 0).await.unwrap();
+        let best_limit_1 = get_best_synced_validators(&pool, 1, 5).await.unwrap();
         assert_eq!(best_limit_1.len(), 1);
         assert_eq!(best_limit_1[0].validator, "ZERO_DRIFT");
 
-        // min_samples=200 filters everyone out (except none qualify)
-        let none = get_best_synced_validators(&pool, 10, 200, 0).await.unwrap();
+        // min_samples=200 filters everyone out (none qualify)
+        let none = get_best_synced_validators(&pool, 10, 200).await.unwrap();
         assert!(none.is_empty());
     }
 
@@ -2193,24 +2197,28 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// v0.5.0: explicit guard for the spec'd best-synced filters
-    /// (n_samples >= 100, stake >= 1000 XNT, foundation excluded,
-    /// |drift| < 5000 ms). Each rejection reason has a synthetic row.
+    /// v0.6.0: stake-based filter is REMOVED from best-synced. A 2-XNT
+    /// validator with NTP-discipline (low |drift|, ≥100 samples, not
+    /// foundation) MUST appear in best-synced. Filters retained are
+    /// purely statistical/structural: n_samples ≥ 100, is_foundation = 0,
+    /// |drift| < 5000 ms.
     #[tokio::test]
-    async fn test_best_synced_excludes_low_stake_and_pathological_drift() {
+    async fn test_best_synced_includes_low_stake_with_good_clock() {
         let pool = init(":memory:").await.unwrap();
         let now = chrono::Utc::now().timestamp();
 
         // (validator, n_samples, mean_drift_ms, stake_lamports, is_foundation)
         let rows = [
-            // Rejected: n=43 < 100, stake=2 XNT < 1000 XNT
-            ("AVfG_low_stake_low_n", 43i64, 0.3, 2_000_000_000i64, 0i64),
-            // Accepted: meets all v0.5.0 thresholds
+            // Accepted: 2 XNT but excellent clock + 200 samples
+            ("Tiny_stake_great_clock", 200i64, 0.3, 2_000_000_000i64, 0i64),
+            // Accepted: meets all thresholds (large stake — also fine)
             ("Real_high_stake", 200, 50.0, 1_500_000_000_000, 0),
             // Rejected: foundation, even with great drift
             ("Foundation_node", 500, 1.0, 55_000_000_000_000, 1),
             // Rejected: |drift|=8000 >= 5000 (pathological)
             ("Pathological_drift", 200, 8000.0, 5_000_000_000_000, 0),
+            // Rejected: n=43 < 100 (insufficient statistical power)
+            ("Low_n_samples", 43, 0.1, 100_000_000_000_000, 0),
         ];
         for (v, n, mean, stake, is_foundation) in rows.iter() {
             sqlx::query(
@@ -2231,33 +2239,40 @@ mod tests {
             .unwrap();
         }
 
-        let best =
-            get_best_synced_validators(&pool, 10, 100, 1_000 * 1_000_000_000)
-                .await
-                .unwrap();
+        let best = get_best_synced_validators(&pool, 10, 100).await.unwrap();
+        let pubkeys: Vec<&str> = best.iter().map(|v| v.validator.as_str()).collect();
 
-        assert_eq!(best.len(), 1, "only Real_high_stake should pass all v0.5.0 filters");
-        assert_eq!(best[0].validator, "Real_high_stake");
+        assert_eq!(best.len(), 2, "expected 2 — both stake levels pass when clock + samples qualify");
+        // Tiny_stake_great_clock has |drift|=0.3 — beats Real_high_stake (|drift|=50)
+        assert_eq!(best[0].validator, "Tiny_stake_great_clock");
+        assert_eq!(best[1].validator, "Real_high_stake");
+        assert!(!pubkeys.contains(&"Foundation_node"));
+        assert!(!pubkeys.contains(&"Pathological_drift"));
+        assert!(!pubkeys.contains(&"Low_n_samples"));
     }
 
-    /// v0.5.0: server-side worst-validators query filters spam (n<20),
-    /// tiny-stake (<100 XNT), and near-baseline drift (|drift|<500 ms).
+    /// v0.6.0: stake-based filter is REMOVED from worst-validators.
+    /// A 2-XNT validator with -23s drift is operationally newsworthy
+    /// regardless of stake — catastrophic operator misconfig is signal.
+    /// Filters retained: n_samples ≥ 20, |drift| ≥ 500 ms.
     #[tokio::test]
-    async fn test_worst_validators_filters_noise() {
+    async fn test_worst_validators_includes_low_stake_with_bad_clock() {
         let pool = init(":memory:").await.unwrap();
         let now = chrono::Utc::now().timestamp();
 
         // (validator, n_samples, mean_drift_ms, stake_lamports)
         let rows = [
-            // Rejected: n=5 < 20 AND stake=1 XNT < 100 XNT
-            ("tiny_spam", 5i64, 50_000.0, 1_000_000_000i64),
+            // Rejected: n=5 < 20 (statistical noise)
+            ("tiny_n_spam", 5i64, 50_000.0, 1_000_000_000_000i64),
+            // Accepted: -23s on a 2-XNT validator (still newsworthy)
+            ("tiny_stake_disaster", 100, -23_000.0, 2_000_000_000),
             // Accepted: -23s on a real validator
             ("real_outlier_a", 100, -23_000.0, 100_000_000_000_000),
             // Accepted: +11s on a real validator
             ("real_outlier_b", 100, 11_000.0, 110_000_000_000_000),
             // Rejected: |drift|=100 < 500 (healthy)
             ("healthy", 100, 100.0, 50_000_000_000_000),
-            // Accepted: |drift|=800 ≥ 500 with 50k XNT
+            // Accepted: |drift|=800 ≥ 500
             ("moderate", 50, 800.0, 50_000_000_000_000),
         ];
         for (v, n, mean, stake) in rows.iter() {
@@ -2277,16 +2292,27 @@ mod tests {
             .unwrap();
         }
 
-        let results =
-            get_worst_validators(&pool, 30, 20, 100 * 1_000_000_000, 500.0)
-                .await
-                .unwrap();
+        let results = get_worst_validators(&pool, 30, 20, 500.0).await.unwrap();
+        let pubkeys: Vec<&str> = results.iter().map(|v| v.validator.as_str()).collect();
 
-        assert_eq!(results.len(), 3, "expected 3 entries (filtered tiny_spam, healthy)");
-        // ABS(drift) DESC: 23000, 11000, 800
-        assert_eq!(results[0].validator, "real_outlier_a");
-        assert_eq!(results[1].validator, "real_outlier_b");
-        assert_eq!(results[2].validator, "moderate");
+        assert_eq!(
+            results.len(),
+            4,
+            "expected 4 (tiny_stake_disaster + real_outlier_a + real_outlier_b + moderate); \
+             tiny_n_spam (n<20) and healthy (|drift|<500) filtered"
+        );
+        // ABS(drift) DESC: 23000 (real_a or tiny_stake_disaster), 23000, 11000, 800
+        assert!(pubkeys.contains(&"tiny_stake_disaster"));
+        assert!(pubkeys.contains(&"real_outlier_a"));
+        assert!(pubkeys.contains(&"real_outlier_b"));
+        assert!(pubkeys.contains(&"moderate"));
+        // Last by ABS(drift) must be moderate (800)
+        assert_eq!(results[3].validator, "moderate");
+        // First two are the |23000| pair
+        assert_eq!(results[0].mean_drift_ms.abs() as i64, 23_000);
+        assert_eq!(results[1].mean_drift_ms.abs() as i64, 23_000);
+        // Third is real_outlier_b (11000)
+        assert_eq!(results[2].validator, "real_outlier_b");
     }
 
     /// v0.5.0: foundation drift trend bucketing — verifies the JOIN

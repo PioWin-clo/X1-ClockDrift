@@ -18,10 +18,6 @@
       <input type="checkbox" id="hide-foundation">
       <span data-i18n="hide_foundation">Hide X1 Labs</span>
     </label>
-    <label class="filter-toggle">
-      <input type="checkbox" id="capybara-only">
-      <span data-i18n="capybara_qualifying_only">Capybara qualifying only (≥1000 XNT)</span>
-    </label>
     <div class="lang-toggle" role="group" aria-label="Language">
       <button id="btn-lang-en" class="lang-btn" type="button">🇬🇧 EN</button>
       <button id="btn-lang-pl" class="lang-btn" type="button">🇵🇱 PL</button>
@@ -80,7 +76,6 @@
         <div class="health-sub" data-i18n="health_foundation_sub">separate</div>
       </div>
     </div>
-    <div class="capybara-note" id="capybara-note">—</div>
   </section>
 
   <!-- ===== My clock vs world (kept) ===== -->
@@ -155,7 +150,7 @@
     <div class="ranking-head">
       <div>
         <div class="ranking-title" data-i18n="worst_table_title">Top worst validators</div>
-        <div class="section-help" data-i18n="top_worst_subtitle">Validators with drift ≥500ms · ≥100 XNT stake · ≥20 samples</div>
+        <div class="section-help" data-i18n="worst_top_subtitle">Validators with drift ≥500 ms · ≥20 samples · any stake.</div>
       </div>
       <div class="ranking-controls">
         <select id="severity-filter" class="severity-filter">
@@ -165,6 +160,13 @@
         </select>
         <input class="search" id="search" type="search" data-i18n-attr-placeholder="ranking_search_placeholder" autocomplete="off">
       </div>
+    </div>
+    <div class="table-filters">
+      <label class="stake-filter">
+        <span data-i18n="stake_filter_label">Min stake (XNT, optional)</span>
+        <input type="number" id="worst-min-stake" min="0" step="1" placeholder="0">
+      </label>
+      <span class="filter-hint" data-i18n="stake_filter_hint">Client-side lens. Server keeps all stake levels.</span>
     </div>
     <div class="table-wrap">
       <table class="worst-table">
@@ -193,7 +195,14 @@
   <section class="best-synced-section">
     <div class="best-synced-header">
       <div class="section-title" data-i18n="best_synced_title">Best synchronized validators (top 10)</div>
-      <div class="section-help" data-i18n="top_best_subtitle">≥100 samples · ≥1000 XNT · |drift|&lt;5s · foundation excluded</div>
+      <div class="section-help" data-i18n="best_top_subtitle">≥100 samples · |drift| &lt; 5 s · foundation excluded · any stake.</div>
+    </div>
+    <div class="table-filters">
+      <label class="stake-filter">
+        <span data-i18n="stake_filter_label">Min stake (XNT, optional)</span>
+        <input type="number" id="best-min-stake" min="0" step="1" placeholder="0">
+      </label>
+      <span class="filter-hint" data-i18n="stake_filter_hint">Client-side lens. Server keeps all stake levels.</span>
     </div>
     <div class="table-wrap">
       <table class="best-synced-table">

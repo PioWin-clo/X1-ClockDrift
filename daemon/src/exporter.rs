@@ -15,16 +15,13 @@ const BEST_SYNCED_TOP_N: i64 = 10;
 /// for "best" claims. Foundation excluded inside the SQL.
 const BEST_SYNCED_MIN_SAMPLES: i64 = 100;
 const LAMPORTS_PER_XNT: f64 = 1_000_000_000.0;
-/// 1000 XNT in lamports — the Capybara delegation threshold. Validators
-/// below this won't qualify for delegation rewards and are filtered out
-/// of the "best synced" ranking.
-const CAPYBARA_THRESHOLD_LAMPORTS: i64 = 1_000 * 1_000_000_000;
-/// v0.5.0: server-side worst-validators ranking. Filters tuned so that
-/// 100-XNT spam validators with single bad samples don't dominate the
-/// list — only validators stable enough to matter operationally.
+/// v0.6.0: server-side worst-validators ranking. Filters are
+/// statistical/definitional only — no stake-based business logic. A
+/// 2-XNT validator with -23s drift is operationally newsworthy
+/// regardless of stake. Frontend offers an optional client-side stake
+/// lens for users who want to focus on a specific stake band.
 const WORST_TOP_N: i64 = 100;
 const WORST_MIN_SAMPLES: i64 = 20;
-const WORST_MIN_STAKE_LAMPORTS: i64 = 100 * 1_000_000_000; // 100 XNT
 const WORST_MIN_ABS_DRIFT_MS: f64 = 500.0;
 /// v0.5.0: foundation drift trend window — 14 days of 1-hour buckets.
 const FOUNDATION_TREND_DAYS: u32 = 14;
@@ -119,7 +116,6 @@ struct SummaryJson {
     n_healthy: i64,
     n_foundation: i64,
     n_total: i64,
-    n_capybara_qualifying: i64,
 
     // Existing fields (kept for backward compat with v0.3.x consumers)
     n_validators_observed: i64,
@@ -162,7 +158,6 @@ struct ValidatorJson {
     is_foundation: bool,
     foundation_label: Option<String>,
     severity: Option<String>,
-    qualifies_capybara: bool,
 }
 
 #[derive(Serialize)]
@@ -206,7 +201,6 @@ struct BestValidatorJson {
     is_foundation: bool,
     foundation_label: Option<String>,
     severity: Option<String>,
-    qualifies_capybara: bool,
 }
 
 /// v0.4.0: separate showcase for the 12 X1 Labs Foundation nodes.
@@ -373,10 +367,6 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
     let n_healthy  = summaries.iter().filter(|s| s.severity.as_deref() == Some("healthy")).count() as i64;
     let n_foundation = summaries.iter().filter(|s| s.is_foundation).count() as i64;
     let n_total = summaries.len() as i64;
-    let n_capybara_qualifying = summaries
-        .iter()
-        .filter(|s| s.last_stake_lamports >= CAPYBARA_THRESHOLD_LAMPORTS)
-        .count() as i64;
 
     let summary = SummaryJson {
         generated_at_utc: format_iso(now_secs),
@@ -393,7 +383,6 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         n_healthy,
         n_foundation,
         n_total,
-        n_capybara_qualifying,
         // Backward-compat
         n_validators_observed: summaries.len() as i64,
         n_samples_24h: total_samples_24h,
@@ -428,7 +417,6 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         .map(|s| {
             let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
             let weighted_impact_ms_xnt = (s.mean_drift_ms * s.last_stake_lamports as f64) / LAMPORTS_PER_XNT;
-            let qualifies_capybara = s.last_stake_lamports >= CAPYBARA_THRESHOLD_LAMPORTS;
             ValidatorJson {
                 pubkey: s.validator,
                 mean_drift_ms: s.mean_drift_ms,
@@ -447,7 +435,6 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
                 is_foundation: s.is_foundation,
                 foundation_label: s.foundation_label,
                 severity: s.severity,
-                qualifies_capybara,
             }
         })
         .collect();
@@ -483,14 +470,16 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         latest_slot_observed: latest,
     };
 
-    // Best-synced validators: smallest abs(mean) with v0.4.0 stricter
-    // filter — min 100 samples, min 1000 XNT stake (Capybara threshold),
-    // foundation excluded (they have a dedicated showcase).
+    // Best-synced validators: smallest abs(mean) with v0.6.0 filters —
+    // min 100 samples, foundation excluded (dedicated showcase),
+    // |drift| < 5000 ms (defensive). Stake-based filter dropped: a 2-XNT
+    // validator with NTP-discipline can have a tighter clock than a
+    // 100k-XNT one, and Capybara delegation gating is a Foundation
+    // business decision out of scope for this dashboard.
     let best_rows = db::get_best_synced_validators(
         pool,
         BEST_SYNCED_TOP_N,
         BEST_SYNCED_MIN_SAMPLES,
-        CAPYBARA_THRESHOLD_LAMPORTS,
     )
     .await
     .unwrap_or_default();
@@ -499,7 +488,6 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         .enumerate()
         .map(|(idx, s)| {
             let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
-            let qualifies_capybara = s.last_stake_lamports >= CAPYBARA_THRESHOLD_LAMPORTS;
             BestValidatorJson {
                 rank: (idx as i64) + 1,
                 vote_account: s.validator,
@@ -517,7 +505,6 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
                 is_foundation: s.is_foundation,
                 foundation_label: s.foundation_label,
                 severity: s.severity,
-                qualifies_capybara,
             }
         })
         .collect();
@@ -543,14 +530,15 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         })
         .collect();
 
-    // v0.5.0: server-side worst-validators ranking with explicit
-    // thresholds so spammy 1-XNT validators with single noisy samples
-    // can't dominate the dashboard's most prominent table.
+    // v0.6.0: server-side worst-validators ranking — statistical/
+    // definitional filters only (n>=20, |drift|>=500ms). Stake gate
+    // removed: a 2-XNT validator with -23s drift is operationally
+    // newsworthy regardless of stake. Frontend offers an optional
+    // client-side stake filter for users who want a stake lens.
     let worst_rows = db::get_worst_validators(
         pool,
         WORST_TOP_N,
         WORST_MIN_SAMPLES,
-        WORST_MIN_STAKE_LAMPORTS,
         WORST_MIN_ABS_DRIFT_MS,
     )
     .await
@@ -644,7 +632,6 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         n_clusters = summary.n_clusters_detected,
         n_critical = summary.n_critical,
         n_high = summary.n_high,
-        n_capybara = summary.n_capybara_qualifying,
         n_histories,
         "wrote JSON exports"
     );
