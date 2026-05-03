@@ -7,7 +7,8 @@ const I18N = {
     tagline: 'Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.',
     updated: 'updated',
     hide_foundation: 'Hide X1 Labs',
-    capybara_qualifying_only: 'Capybara qualifying only (≥1000 XNT)',
+    stake_filter_label: 'Min stake (XNT, optional)',
+    stake_filter_hint: 'Client-side lens. Server keeps all stake levels.',
 
     hero1_title: 'X1 network time right now',
     hero1_chain_time: 'X1 chain consensus',
@@ -33,8 +34,6 @@ const I18N = {
     health_healthy_sub: '<1s',
     health_foundation: 'X1 Labs',
     health_foundation_sub: 'separate',
-    capybara_note: (n, total, pct) =>
-      `${formatInt(n)} of ${formatInt(total)} validators (${pct}%) will qualify for the Capybara delegation upgrade (≥1000 XNT self-stake).`,
 
     chart_history_title: 'Network drift over time (last 7 days, 5-minute buckets)',
     chart_history_median: 'X1 median drift',
@@ -51,8 +50,8 @@ const I18N = {
     foundation_trend_avg: 'avg drift',
     foundation_trend_min: 'min',
     foundation_trend_max: 'max',
-    top_worst_subtitle: 'Validators with drift ≥500ms · ≥100 XNT stake · ≥20 samples',
-    top_best_subtitle: '≥100 samples · ≥1000 XNT · |drift|<5s · foundation excluded',
+    worst_top_subtitle: 'Validators with drift ≥500 ms · ≥20 samples · any stake.',
+    best_top_subtitle: '≥100 samples · |drift|<5 s · foundation excluded · any stake.',
     severity_critical: 'critical',
     severity_high: 'high',
     severity_medium: 'medium',
@@ -73,7 +72,7 @@ const I18N = {
     col_label: 'label',
 
     best_synced_title: 'Best synchronized validators (top 10)',
-    best_synced_help_v04: 'Validators with the smallest absolute drift. Min 1000 XNT stake (Capybara threshold), min 100 samples, foundation excluded.',
+    best_synced_help_v04: 'Validators with the smallest absolute drift. Min 100 samples, foundation excluded, |drift|<5 s. Stake is informational only — operators of any size can rank here.',
 
     foundation_table_title: '🏛️ X1 Labs Foundation',
     foundation_table_help: 'Official X1 Labs infrastructure. Shown separately because their drift is operational baseline, not validator misconfiguration.',
@@ -133,7 +132,8 @@ const I18N = {
     tagline: 'Bieżący dryf <code>Clock::unix_timestamp</code> na blockchainie X1.',
     updated: 'aktualizacja',
     hide_foundation: 'Ukryj X1 Labs',
-    capybara_qualifying_only: 'Tylko kwalifikujące się do Capybara (≥1000 XNT)',
+    stake_filter_label: 'Min stake (XNT, opcjonalnie)',
+    stake_filter_hint: 'Filtr po stronie klienta. Serwer zachowuje wszystkie poziomy stake.',
 
     hero1_title: 'Czas sieci X1 teraz',
     hero1_chain_time: 'Konsensus chain X1',
@@ -159,8 +159,6 @@ const I18N = {
     health_healthy_sub: '<1s',
     health_foundation: 'X1 Labs',
     health_foundation_sub: 'osobno',
-    capybara_note: (n, total, pct) =>
-      `${formatInt(n)} z ${formatInt(total)} walidatorów (${pct}%) zakwalifikuje się do delegacji Capybara (≥1000 XNT self-stake).`,
 
     chart_history_title: 'Dryf sieci w czasie (ostatnie 7 dni, kubełki 5-minutowe)',
     chart_history_median: 'Mediana X1',
@@ -177,8 +175,8 @@ const I18N = {
     foundation_trend_avg: 'średni dryf',
     foundation_trend_min: 'min',
     foundation_trend_max: 'max',
-    top_worst_subtitle: 'Walidatorzy z dryfem ≥500ms · ≥100 XNT stake · ≥20 próbek',
-    top_best_subtitle: '≥100 próbek · ≥1000 XNT · |dryf|<5s · bez fundacji',
+    worst_top_subtitle: 'Walidatorzy z dryfem ≥500 ms · ≥20 próbek · dowolny stake.',
+    best_top_subtitle: '≥100 próbek · |dryf|<5 s · bez fundacji · dowolny stake.',
     severity_critical: 'krytyczny',
     severity_high: 'wysoki',
     severity_medium: 'średni',
@@ -199,7 +197,7 @@ const I18N = {
     col_label: 'label',
 
     best_synced_title: 'Najlepiej zsynchronizowani walidatorzy (top 10)',
-    best_synced_help_v04: 'Walidatory z najmniejszym bezwzględnym dryfem. Min 1000 XNT stake (próg Capybara), min 100 próbek, fundacja wykluczona.',
+    best_synced_help_v04: 'Walidatory z najmniejszym bezwzględnym dryfem. Min 100 próbek, fundacja wykluczona, |dryf|<5 s. Stake jest informacyjny — operatorzy o dowolnej wielkości mogą się znaleźć na liście.',
 
     foundation_table_title: '🏛️ X1 Labs Foundation',
     foundation_table_help: 'Oficjalna infrastruktura X1 Labs. Pokazana osobno bo ich dryf jest baseline operacyjnym, nie błędem konfiguracji walidatora.',
@@ -262,12 +260,10 @@ const CLUSTER_COLORS = [
 ];
 
 const STABILITY_THRESHOLD_MS = 500;
-const CAPYBARA_THRESHOLD_XNT = 1000;
 
 const state = {
   lang: 'en',
   hideFoundation: false,
-  capybaraOnly: false,
   severityFilter: 'all',
   summary: null,
   validators: [],
@@ -283,6 +279,10 @@ const state = {
   sortKey: 'mean_drift_ms_abs',
   sortDir: -1,
   query: '',
+  // v0.6.0: optional client-side stake lens for best/worst tables.
+  // 0 means "no filter" — server already returns all stake levels.
+  bestMinStake: 0,
+  worstMinStake: 0,
 };
 
 const el = {};
@@ -296,7 +296,6 @@ function bindElements() {
   el.nHigh = document.getElementById('n-high');
   el.nHealthy = document.getElementById('n-healthy');
   el.nFoundation = document.getElementById('n-foundation');
-  el.capybaraNote = document.getElementById('capybara-note');
   el.worstBody = document.getElementById('worst-body');
   el.bestSyncedBody = document.getElementById('best-synced-body');
   el.foundationBody = document.getElementById('foundation-body');
@@ -316,7 +315,8 @@ function bindElements() {
   el.btnLangEn = document.getElementById('btn-lang-en');
   el.btnLangPl = document.getElementById('btn-lang-pl');
   el.hideFoundation = document.getElementById('hide-foundation');
-  el.capybaraOnly = document.getElementById('capybara-only');
+  el.bestMinStake = document.getElementById('best-min-stake');
+  el.worstMinStake = document.getElementById('worst-min-stake');
   el.nClusters = document.getElementById('n-clusters');
   el.nClustered = document.getElementById('n-clustered');
   el.nClusteredPct = document.getElementById('n-clustered-pct');
@@ -343,9 +343,19 @@ function initLanguage() {
 
 function initFilters() {
   state.hideFoundation = localStorage.getItem('hideFoundation') === '1';
-  state.capybaraOnly = localStorage.getItem('capybaraOnly') === '1';
   el.hideFoundation.checked = state.hideFoundation;
-  el.capybaraOnly.checked = state.capybaraOnly;
+  // v0.6.0: optional client-side stake lens. Persist user choice across
+  // reloads so the lens sticks. 0 / NaN / negative all mean "no filter".
+  const savedBest = parseFloat(localStorage.getItem('bestMinStake') || '0');
+  const savedWorst = parseFloat(localStorage.getItem('worstMinStake') || '0');
+  state.bestMinStake = isFinite(savedBest) && savedBest > 0 ? savedBest : 0;
+  state.worstMinStake = isFinite(savedWorst) && savedWorst > 0 ? savedWorst : 0;
+  if (el.bestMinStake) {
+    el.bestMinStake.value = state.bestMinStake > 0 ? String(state.bestMinStake) : '';
+  }
+  if (el.worstMinStake) {
+    el.worstMinStake.value = state.worstMinStake > 0 ? String(state.worstMinStake) : '';
+  }
 }
 
 function applyI18n() {
@@ -431,7 +441,6 @@ async function fetchJSONOptional(path) {
 function visibleValidators() {
   return state.validators.filter((v) => {
     if (state.hideFoundation && v.is_foundation) return false;
-    if (state.capybaraOnly && !v.qualifies_capybara) return false;
     return true;
   });
 }
@@ -492,29 +501,21 @@ function heroDriftColorClass(absMs) {
 
 function renderHero2() {
   // Hero #2 numbers come from the live filtered population so the
-  // toggles in the header (hide-foundation, capybara-only) actually
-  // affect the prominent counts. Fall back to summary.json values
-  // when no filtering is active, for consistency with snapshot.
+  // hide-foundation toggle actually affects the prominent counts.
+  // v0.6.0: Capybara delegation count was removed — stake-based business
+  // gating is out of scope for this dashboard.
   const visible = visibleValidators();
-  const counts = {
-    critical: 0, high: 0, healthy: 0, foundation: 0, capybara: 0,
-  };
+  const counts = { critical: 0, high: 0, healthy: 0, foundation: 0 };
   for (const v of visible) {
     if (v.is_foundation) counts.foundation++;
     else if (v.severity === 'critical') counts.critical++;
     else if (v.severity === 'high') counts.high++;
     else if (v.severity === 'healthy') counts.healthy++;
-    if (v.qualifies_capybara) counts.capybara++;
   }
   el.nCritical.textContent = formatInt(counts.critical);
   el.nHigh.textContent = formatInt(counts.high);
   el.nHealthy.textContent = formatInt(counts.healthy);
   el.nFoundation.textContent = formatInt(counts.foundation);
-
-  const t = I18N[state.lang];
-  const total = visible.length;
-  const pct = total > 0 ? ((100 * counts.capybara) / total).toFixed(1) : '0.0';
-  el.capybaraNote.textContent = t.capybara_note(counts.capybara, total, pct);
 }
 
 function renderClock() {
@@ -902,7 +903,14 @@ function renderClusters() {
 function renderBestSynced() {
   el.bestSyncedBody.innerHTML = '';
   if (!Array.isArray(state.best) || state.best.length === 0) return;
-  state.best.forEach((b) => {
+  // v0.6.0: optional client-side stake lens. Server returns all stake
+  // levels — user can narrow the view to e.g. ≥1000 XNT here without
+  // affecting other dashboards or the backend filter logic.
+  const minXnt = state.bestMinStake || 0;
+  const rows = minXnt > 0
+    ? state.best.filter((b) => (b.stake_xnt || 0) >= minXnt)
+    : state.best;
+  rows.forEach((b) => {
     const tr = document.createElement('tr');
     tr.appendChild(td(String(b.rank)));
     tr.appendChild(pubkeyCell(b.vote_account, { ...b, pubkey: b.vote_account }));
@@ -950,15 +958,18 @@ function bestSyncedColor(ms) {
 
 /// v0.5.0: source data is now `state.worst` (server-side filtered top
 /// worst from `worst_validators.json`), not the full `state.validators`.
+/// v0.6.0: server-side stake gate removed; an optional client-side
+/// `worstMinStake` lens lets the user narrow the table to a chosen stake
+/// floor without affecting other dashboards.
 /// Frontend filters: search by pubkey, severity dropdown, hide-foundation
-/// + capybara-only toggles.
+/// + optional min-stake input.
 function applyWorstFilter() {
   const q = state.query;
   const sevFilter = state.severityFilter;
+  const minXnt = state.worstMinStake || 0;
   state.filtered = (state.worst || []).filter((v) => {
     if (state.hideFoundation && v.is_foundation) return false;
-    // Capybara qualifying = stake >= 1000 XNT (10^12 lamports)
-    if (state.capybaraOnly && (v.stake_lamports || 0) < 1_000_000_000_000) return false;
+    if (minXnt > 0 && (v.stake_xnt || 0) < minXnt) return false;
     const pubkey = v.vote_account || v.pubkey || '';
     if (q && !pubkey.toLowerCase().includes(q)) return false;
     if (sevFilter === 'critical' && v.severity !== 'critical') return false;
@@ -1228,11 +1239,27 @@ function wireEventHandlers() {
     localStorage.setItem('hideFoundation', state.hideFoundation ? '1' : '0');
     renderAll();
   });
-  el.capybaraOnly.addEventListener('change', () => {
-    state.capybaraOnly = el.capybaraOnly.checked;
-    localStorage.setItem('capybaraOnly', state.capybaraOnly ? '1' : '0');
-    renderAll();
-  });
+  // v0.6.0: optional client-side stake lens for best/worst tables.
+  // The server returns all stake levels; these inputs purely re-filter
+  // what is already in memory. Empty/NaN/<=0 means "no filter".
+  if (el.bestMinStake) {
+    el.bestMinStake.addEventListener('input', () => {
+      const v = parseFloat(el.bestMinStake.value);
+      state.bestMinStake = isFinite(v) && v > 0 ? v : 0;
+      localStorage.setItem('bestMinStake', String(state.bestMinStake));
+      renderBestSynced();
+    });
+  }
+  if (el.worstMinStake) {
+    el.worstMinStake.addEventListener('input', () => {
+      const v = parseFloat(el.worstMinStake.value);
+      state.worstMinStake = isFinite(v) && v > 0 ? v : 0;
+      localStorage.setItem('worstMinStake', String(state.worstMinStake));
+      state.page = 0;
+      applyWorstFilter();
+      renderWorstTable();
+    });
+  }
   el.severityFilter.addEventListener('change', () => {
     state.severityFilter = el.severityFilter.value;
     state.page = 0;
