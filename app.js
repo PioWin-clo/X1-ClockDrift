@@ -35,11 +35,18 @@ const I18N = {
     health_foundation: 'X1 Labs',
     health_foundation_sub: 'separate',
 
-    chart_history_title: 'Network drift over time (last 7 days, 5-minute buckets)',
+    chart_history_title: 'Network drift over time (5-minute buckets)',
     chart_history_median: 'X1 median drift',
     chart_history_stake: 'X1 stake-weighted',
     chart_history_sentinel: 'Sentinel offset (ms)',
     chart_axis_drift_ms: 'drift (ms)',
+    network_window_2d: '2d',
+    network_window_4d: '4d',
+    network_window_6d: '6d',
+    network_window_12d: '12d',
+    network_show_outliers: 'Show outliers',
+    network_outlier_alert_title: '⚠️ Chain time anomalies detected:',
+    chart_y_clamped_note: 'Y-axis: ±5000 ms · ▲ marker = value exceeds range',
     chart_histogram_title: 'Validator drift distribution (all tracked)',
     foundation_trend_title: 'X1 Labs foundation drift trend (14 days)',
     foundation_trend_help: 'Tracks the 12-node X1 Labs foundation cluster drift over time. Sudden shifts (>100 ms in one bucket) indicate X1 Labs changed Tachyon configuration, NTP source, or deployed an update.',
@@ -160,10 +167,17 @@ const I18N = {
     health_foundation: 'X1 Labs',
     health_foundation_sub: 'osobno',
 
-    chart_history_title: 'Dryf sieci w czasie (ostatnie 7 dni, kubełki 5-minutowe)',
+    chart_history_title: 'Dryf sieci w czasie (kubełki 5-minutowe)',
     chart_history_median: 'Mediana X1',
     chart_history_stake: 'X1 ważone stakiem',
     chart_history_sentinel: 'Odchylenie Sentinela (ms)',
+    network_window_2d: '2d',
+    network_window_4d: '4d',
+    network_window_6d: '6d',
+    network_window_12d: '12d',
+    network_show_outliers: 'Pokaż outlierów',
+    network_outlier_alert_title: '⚠️ Wykryto anomalie chain time:',
+    chart_y_clamped_note: 'Oś Y: ±5000 ms · ▲ marker = wartość przekracza zakres',
     chart_axis_drift_ms: 'dryf (ms)',
     chart_histogram_title: 'Rozkład dryfu walidatorów (wszyscy śledzeni)',
     foundation_trend_title: 'Trend dryfu fundacji X1 Labs (14 dni)',
@@ -283,7 +297,19 @@ const state = {
   // 0 means "no filter" — server already returns all stake levels.
   bestMinStake: 0,
   worstMinStake: 0,
+  // v0.7.0: network-drift chart window selector + outlier handling.
+  // history.json holds 7 days; the user picks how many of those to show.
+  // Outlier-clamp keeps the y-axis at ±5000 ms (or tighter via p1/p99
+  // padding) when showOutliers is false, so a single 58s incident
+  // doesn't squash the baseline line into a flat strip.
+  networkDriftWindowDays: 6,
+  showOutliers: false,
 };
+// v0.7.0: y-axis hard cap when outliers are clamped. Anything above this
+// is rendered as a triangular marker on the chart edge + listed in the
+// outlier-alert div so operators still see real chain-time anomalies.
+const NETWORK_OUTLIER_THRESHOLD_MS = 5000;
+const VALID_WINDOW_DAYS = [2, 4, 6, 12];
 
 const el = {};
 function bindElements() {
@@ -317,6 +343,12 @@ function bindElements() {
   el.hideFoundation = document.getElementById('hide-foundation');
   el.bestMinStake = document.getElementById('best-min-stake');
   el.worstMinStake = document.getElementById('worst-min-stake');
+  // v0.7.0: network-drift chart controls
+  el.windowButtons = Array.from(document.querySelectorAll('.window-btn'));
+  el.showOutliers = document.getElementById('show-outliers');
+  el.chartYClampedNote = document.getElementById('chart-y-clamped-note');
+  el.networkOutlierAlert = document.getElementById('network-outlier-alert');
+  el.networkOutlierAlertList = document.getElementById('network-outlier-alert-list');
   el.nClusters = document.getElementById('n-clusters');
   el.nClustered = document.getElementById('n-clustered');
   el.nClusteredPct = document.getElementById('n-clustered-pct');
@@ -356,6 +388,23 @@ function initFilters() {
   if (el.worstMinStake) {
     el.worstMinStake.value = state.worstMinStake > 0 ? String(state.worstMinStake) : '';
   }
+  // v0.7.0: network-drift chart window + outlier toggle. Persist both,
+  // default to 6d/clamped view (typically the most readable for a 7-day
+  // history with the rare multi-second incident in it).
+  const savedWindow = parseInt(localStorage.getItem('networkDriftWindowDays') || '', 10);
+  state.networkDriftWindowDays = VALID_WINDOW_DAYS.includes(savedWindow) ? savedWindow : 6;
+  state.showOutliers = localStorage.getItem('showOutliers') === '1';
+  if (el.showOutliers) el.showOutliers.checked = state.showOutliers;
+  syncWindowButtons();
+}
+
+// v0.7.0: visually mark the active window button (segmented control look).
+function syncWindowButtons() {
+  if (!Array.isArray(el.windowButtons)) return;
+  el.windowButtons.forEach((btn) => {
+    const days = parseInt(btn.dataset.windowDays || '', 10);
+    btn.classList.toggle('active', days === state.networkDriftWindowDays);
+  });
 }
 
 function applyI18n() {
@@ -572,11 +621,45 @@ function tickWallClock() {
 }
 
 let chartHistory = null;
+
+// v0.7.0: percentile over a numeric array. Returns null on empty input.
+// Used to clamp the y-axis to a "typical-data" band (p1..p99 with 20%
+// padding) so a single 58s incident doesn't squash the baseline.
+function percentile(values, p) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor((p / 100) * (sorted.length - 1))));
+  return sorted[idx];
+}
+
+// v0.7.0: human-readable absolute-drift formatter for outlier list and
+// the on-chart marker label. Keeps "ms" for sub-second values, switches
+// to "s" with one decimal for >=1000 ms (the regime that motivated this).
+function formatDriftMagnitude(ms) {
+  const a = Math.abs(ms);
+  if (a >= 1000) return `${(a / 1000).toFixed(1)} s`;
+  return `${a.toFixed(0)} ms`;
+}
+
 function renderHistoryChart() {
   const ctx = document.getElementById('chart-history');
   if (!ctx || !window.Chart) return;
   const t = I18N[state.lang];
-  const data = state.history || [];
+
+  // v0.7.0: filter by selected window. history.json holds 7 days; the
+  // user picks how much of that to show. We compare against the most
+  // recent bucket's timestamp rather than Date.now() so a stale export
+  // still renders something useful (don't blank the chart on a paused
+  // exporter).
+  const all = Array.isArray(state.history) ? state.history : [];
+  const days = state.networkDriftWindowDays || 6;
+  let data = all;
+  if (all.length > 0) {
+    const latestTs = all[all.length - 1].bucket_ts || 0;
+    const cutoffTs = latestTs - days * 86400;
+    data = all.filter((d) => (d.bucket_ts || 0) >= cutoffTs);
+  }
+
   const labels = data.map((d) => d.bucket_iso);
   const median = data.map((d) => d.median_drift_ms);
   const stakeW = data.map((d) => d.stake_weighted_drift_ms);
@@ -589,12 +672,113 @@ function renderHistoryChart() {
   const sentinel = data.map((d) =>
     d.sentinel_offset_us != null ? d.sentinel_offset_us / 1000 : null,
   );
+
+  // v0.7.0: outlier handling — when showOutliers is OFF, clamp y-axis
+  // to a "typical" band so a single 58s spike doesn't flatten the
+  // baseline into a one-pixel strip. Outlier buckets aren't dropped:
+  // their values stay in the dataset (the line clips at the axis edge),
+  // and we annotate them in the alert panel below the chart.
+  // Per spec: clamp = (p1, p99) with 20% padding, hard-capped at ±5000 ms.
+  const xnt = [];
+  for (const v of median) if (typeof v === 'number') xnt.push(v);
+  for (const v of stakeW) if (typeof v === 'number') xnt.push(v);
+  let yMin = null;
+  let yMax = null;
+  if (!state.showOutliers && xnt.length > 0) {
+    const p1 = percentile(xnt, 1);
+    const p99 = percentile(xnt, 99);
+    if (p1 != null && p99 != null) {
+      const span = p99 - p1;
+      const pad = Math.max(span * 0.2, 50); // 20% pad, never less than 50 ms
+      let lo = p1 - pad;
+      let hi = p99 + pad;
+      // Hard cap: outlier-clamped view never spans more than ±5000 ms.
+      lo = Math.max(lo, -NETWORK_OUTLIER_THRESHOLD_MS);
+      hi = Math.min(hi, NETWORK_OUTLIER_THRESHOLD_MS);
+      // Always include 0 — the "real UTC" reference line is a useful anchor.
+      if (lo > 0) lo = 0;
+      if (hi < 0) hi = 0;
+      yMin = lo;
+      yMax = hi;
+    }
+  }
+
+  // v0.7.0: detect outlier buckets in the visible window for the alert
+  // list below the chart. Threshold mirrors the y-axis hard cap so the
+  // list and the chart agree on "what's an outlier here."
+  const outliers = [];
+  for (let i = 0; i < data.length; i += 1) {
+    const m = median[i];
+    const s = stakeW[i];
+    const candidates = [];
+    if (typeof m === 'number' && Math.abs(m) >= NETWORK_OUTLIER_THRESHOLD_MS) {
+      candidates.push(m);
+    }
+    if (typeof s === 'number' && Math.abs(s) >= NETWORK_OUTLIER_THRESHOLD_MS) {
+      candidates.push(s);
+    }
+    if (candidates.length === 0) continue;
+    // Use the larger-magnitude value so the alert reflects the worst signal.
+    const worst = candidates.reduce(
+      (acc, v) => (Math.abs(v) > Math.abs(acc) ? v : acc),
+      candidates[0],
+    );
+    outliers.push({
+      bucket_iso: data[i].bucket_iso,
+      bucket_ts: data[i].bucket_ts,
+      drift_ms: worst,
+      index: i,
+    });
+  }
+
+  // v0.7.0: triangular markers on the median series at outlier indices,
+  // pinned to the y-axis edge so they're visible even when the actual
+  // value is clipped. Default pointRadius is 0, so non-outlier points
+  // remain invisible — only spikes get the ▲.
+  const outlierIndexSet = new Set(outliers.map((o) => o.index));
+  const markerPointRadius = data.map((_, i) => (outlierIndexSet.has(i) ? 6 : 0));
+  const markerPointStyle = data.map((_, i) =>
+    outlierIndexSet.has(i) ? 'triangle' : 'circle',
+  );
+  const markerPointColor = data.map((_, i) =>
+    outlierIndexSet.has(i) ? '#f85149' : 'rgba(0,0,0,0)',
+  );
+
   const sentinelLabel = t.chart_history_sentinel;
   const datasets = [
-    { label: t.chart_history_median, data: median, borderColor: '#58a6ff', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yLeft' },
+    {
+      label: t.chart_history_median,
+      data: median,
+      borderColor: '#58a6ff',
+      backgroundColor: 'transparent',
+      pointRadius: markerPointRadius,
+      pointStyle: markerPointStyle,
+      pointBackgroundColor: markerPointColor,
+      pointBorderColor: markerPointColor,
+      pointHoverRadius: 6,
+      borderWidth: 1.5,
+      tension: 0.2,
+      yAxisID: 'yLeft',
+    },
     { label: t.chart_history_stake, data: stakeW, borderColor: '#3fb950', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yLeft' },
     { label: sentinelLabel, data: sentinel, borderColor: '#d29922', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yLeft', spanGaps: true },
   ];
+
+  // v0.7.0: y-axis scale config — explicit min/max only when clamping.
+  // When showOutliers=true we let Chart.js auto-fit (natural range,
+  // 60s spike will be visible).
+  const yLeftScale = {
+    type: 'linear',
+    position: 'left',
+    ticks: { color: '#8b949e' },
+    grid: { color: '#21262d' },
+    title: { display: true, text: t.chart_axis_drift_ms, color: '#8b949e' },
+  };
+  if (yMin != null && yMax != null) {
+    yLeftScale.min = yMin;
+    yLeftScale.max = yMax;
+  }
+
   if (chartHistory) chartHistory.destroy();
   chartHistory = new Chart(ctx, {
     type: 'line',
@@ -621,10 +805,50 @@ function renderHistoryChart() {
       },
       scales: {
         x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
-        yLeft: { type: 'linear', position: 'left', ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, title: { display: true, text: t.chart_axis_drift_ms, color: '#8b949e' } },
+        yLeft: yLeftScale,
       },
     },
   });
+
+  renderNetworkOutlierAlert(outliers);
+  // The "±5000 ms · ▲ marker" hint is only meaningful when clamping is
+  // active. Hide it in the natural-range view so the chart-controls row
+  // doesn't carry stale text.
+  if (el.chartYClampedNote) {
+    el.chartYClampedNote.hidden = state.showOutliers;
+  }
+}
+
+// v0.7.0: render the "Chain time anomalies detected" panel below the
+// chart. Pattern matches the existing #foundation-alert-card (yellow
+// border, hidden when 0 entries). One <li> per outlier bucket, sorted
+// chronologically.
+function renderNetworkOutlierAlert(outliers) {
+  if (!el.networkOutlierAlert || !el.networkOutlierAlertList) return;
+  if (!outliers || outliers.length === 0) {
+    el.networkOutlierAlert.hidden = true;
+    el.networkOutlierAlertList.innerHTML = '';
+    return;
+  }
+  el.networkOutlierAlert.hidden = false;
+  el.networkOutlierAlertList.innerHTML = '';
+  const sorted = outliers.slice().sort((a, b) => (a.bucket_ts || 0) - (b.bucket_ts || 0));
+  for (const o of sorted) {
+    const li = document.createElement('li');
+    const ts = document.createElement('span');
+    ts.className = 'mono';
+    ts.textContent = o.bucket_iso || '—';
+    const sep = document.createElement('span');
+    sep.textContent = ': ';
+    const drift = document.createElement('span');
+    drift.className = 'mono';
+    const sign = o.drift_ms >= 0 ? '+' : '−';
+    drift.textContent = `${sign}${formatDriftMagnitude(o.drift_ms)} drift`;
+    li.appendChild(ts);
+    li.appendChild(sep);
+    li.appendChild(drift);
+    el.networkOutlierAlertList.appendChild(li);
+  }
 }
 
 /// v0.5.0: 14-day foundation drift trend chart. Three datasets:
@@ -1258,6 +1482,29 @@ function wireEventHandlers() {
       state.page = 0;
       applyWorstFilter();
       renderWorstTable();
+    });
+  }
+  // v0.7.0: network-drift chart window selector + outlier toggle. Both
+  // operate purely client-side over the existing 7-day history.json —
+  // no extra fetches, no server round-trip. Re-render is cheap because
+  // the chart already destroys+rebuilds on every refresh tick.
+  if (Array.isArray(el.windowButtons)) {
+    el.windowButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const days = parseInt(btn.dataset.windowDays || '', 10);
+        if (!VALID_WINDOW_DAYS.includes(days)) return;
+        state.networkDriftWindowDays = days;
+        localStorage.setItem('networkDriftWindowDays', String(days));
+        syncWindowButtons();
+        renderHistoryChart();
+      });
+    });
+  }
+  if (el.showOutliers) {
+    el.showOutliers.addEventListener('change', () => {
+      state.showOutliers = el.showOutliers.checked;
+      localStorage.setItem('showOutliers', state.showOutliers ? '1' : '0');
+      renderHistoryChart();
     });
   }
   el.severityFilter.addEventListener('change', () => {
