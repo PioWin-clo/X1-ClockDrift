@@ -1086,3 +1086,117 @@ table.foundation-table tr:hover td { background: var(--surface-2); }
   margin-left: 4px;
 }
 .explainer-cta a:hover { color: var(--text); border-bottom-color: var(--text); }
+
+/* ===== v1.1.0: diagnostic snapshot widget (Layer 1 / Layer 2 side-by-side) ===== */
+.diagnostic-snapshot {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.diagnostic-snapshot > .section-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.diagnostic-snapshot .section-subtitle {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 12px 0;
+}
+@media (max-width: 768px) {
+  .snapshot-grid { grid-template-columns: 1fr; }
+}
+.snapshot-card {
+  padding: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  border-left: 4px solid var(--border);
+}
+.snapshot-pipeline { border-left-color: var(--good); }
+.snapshot-drift    { border-left-color: var(--bad); }
+.snapshot-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.snapshot-header h3 {
+  margin: 0;
+  flex: 1;
+  font-size: 14px;
+  font-weight: 700;
+}
+.snapshot-icon { font-size: 20px; }
+.snapshot-layer-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.snapshot-metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 8px 0;
+}
+.snapshot-metric .metric-value {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+}
+/* Pipeline status colors — match Hero #1 band logic */
+.snapshot-pipeline .metric-value.status-healthy   { color: var(--good); }
+.snapshot-pipeline .metric-value.status-elevated  { color: var(--warn); }
+.snapshot-pipeline .metric-value.status-disrupted { color: var(--bad); }
+/* Clock-drift outlier count — clean (zero) is good, anything else is alarming */
+.snapshot-drift .metric-value.status-clean   { color: var(--good); }
+.snapshot-drift .metric-value.status-warning { color: var(--bad); }
+.snapshot-metric .metric-unit {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.snapshot-status {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 4px 0 8px;
+}
+.snapshot-context {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 4px 0;
+}
+.snapshot-help {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+.diagnostic-cta {
+  text-align: center;
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.diagnostic-cta a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent);
+  font-weight: 600;
+}
+.diagnostic-cta a:hover { color: var(--text); border-bottom-color: var(--text); }

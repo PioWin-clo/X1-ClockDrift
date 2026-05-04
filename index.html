@@ -76,6 +76,59 @@
     </div>
   </section>
 
+  <!-- ===== v1.1.0: Diagnostic snapshot — side-by-side Layer 1 / Layer 2 ===== -->
+  <section class="diagnostic-snapshot">
+    <h2 class="section-title" data-i18n="diagnostic_snapshot_title">Network diagnostic snapshot</h2>
+    <p class="section-subtitle" data-i18n="diagnostic_snapshot_subtitle">Side-by-side: pipeline health vs clock drift outliers</p>
+
+    <div class="snapshot-grid">
+      <!-- LEFT: Layer 1 — Pipeline -->
+      <div class="snapshot-card snapshot-pipeline">
+        <div class="snapshot-header">
+          <span class="snapshot-icon" aria-hidden="true">📊</span>
+          <h3 data-i18n="snapshot_pipeline_title">Vote pipeline latency</h3>
+          <span class="snapshot-layer-badge" data-i18n="layer_1_label">Layer 1</span>
+        </div>
+        <div class="snapshot-metric">
+          <span class="metric-value mono" id="snapshot-pipeline-current">—</span>
+          <span class="metric-unit">ms</span>
+        </div>
+        <div class="snapshot-status" id="snapshot-pipeline-status">—</div>
+        <p class="snapshot-context">
+          <span data-i18n="snapshot_pipeline_baseline">Baseline:</span>
+          <span class="mono" id="snapshot-pipeline-baseline">—</span>
+          <span class="metric-unit">ms</span>
+        </p>
+        <p class="snapshot-help" data-i18n="snapshot_pipeline_help">Network-wide median lag from vote creation to block inclusion. ~400-850 ms is healthy Tachyon protocol behavior.</p>
+      </div>
+
+      <!-- RIGHT: Layer 2 — Clock drift outliers -->
+      <div class="snapshot-card snapshot-drift">
+        <div class="snapshot-header">
+          <span class="snapshot-icon" aria-hidden="true">🔴</span>
+          <h3 data-i18n="snapshot_drift_title">Clock drift outliers</h3>
+          <span class="snapshot-layer-badge" data-i18n="layer_2_label">Layer 2</span>
+        </div>
+        <div class="snapshot-metric">
+          <span class="metric-value mono" id="snapshot-drift-count">—</span>
+          <span class="metric-unit" data-i18n="validators_label">validators</span>
+        </div>
+        <div class="snapshot-status" id="snapshot-drift-status">—</div>
+        <p class="snapshot-context">
+          <span data-i18n="snapshot_drift_worst">Worst:</span>
+          <span class="mono" id="snapshot-drift-worst">—</span>
+        </p>
+        <p class="snapshot-help" data-i18n="snapshot_drift_help">Validators with |drift| ≥ 5 seconds — genuine NTP/chrony misconfiguration. Full list in the Anomalies section below.</p>
+      </div>
+    </div>
+
+    <p class="diagnostic-cta">
+      <span data-i18n="diagnostic_cta_text">Operating a validator? Find your row in the tables below, then check the </span>
+      <a href="docs/methodology.html#diagnostic-guide" data-i18n="diagnostic_cta_link">step-by-step diagnostic guide</a>
+      <span data-i18n="diagnostic_cta_suffix"> for fix instructions.</span>
+    </p>
+  </section>
+
   <!-- ===== My clock vs world (kept) ===== -->
   <section class="clock-section">
     <div class="section-title" data-i18n="clock_section_title">My clock vs world</div>

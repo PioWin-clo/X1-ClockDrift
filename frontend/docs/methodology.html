@@ -90,6 +90,106 @@
     border-bottom: 1px solid var(--border);
   }
   .doc th { color: var(--text-dim); font-weight: 600; }
+
+  /* v1.1.0 — Diagnostic flowchart */
+  .diagnostic-guide {
+    margin: 32px 0 0;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+  .diagnostic-guide .lead {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin: 0 0 16px;
+  }
+  .diagnostic-step {
+    margin: 24px 0;
+    padding: 20px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .diagnostic-step h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 8px;
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .step-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: var(--accent);
+    color: var(--bg);
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .diagnostic-cases {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .case {
+    padding: 12px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    border-left: 3px solid var(--border);
+  }
+  .case h4 { margin: 0 0 6px; font-size: 14px; font-weight: 700; }
+  .case p { margin: 4px 0; }
+  .case-network-wide { border-left-color: var(--warn); }
+  .case-isolated     { border-left-color: var(--bad); }
+  .diagnostic-tiers {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .tier {
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    border-left: 4px solid var(--border);
+  }
+  .tier h4 {
+    margin: 0 0 8px;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .tier p { margin: 6px 0; }
+  .tier ul, .tier ol { margin: 6px 0 6px 24px; }
+  .tier-ok    { border-left-color: var(--good); }
+  .tier-slow  { border-left-color: var(--warn); }
+  .tier-drift { border-left-color: var(--bad); }
+  .tier pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 6px 0;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .severity-flow {
+    text-align: center;
+    padding: 10px 14px;
+    margin: 12px 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 14px;
+  }
 </style>
 </head>
 <body>
@@ -276,6 +376,170 @@
     changes — sudden &gt;100 ms shifts in the avg-lag line correspond
     to Tachyon config changes, NTP source swaps, or deployments.
   </p>
+
+  <section class="diagnostic-guide" id="diagnostic-guide">
+    <h2>Diagnosing your validator</h2>
+    <p class="lead">
+      If your validator shows elevated drift on this dashboard, walk
+      through these steps to identify the cause. The dashboard
+      distinguishes pipeline issues (network/infra, Layer 1) from clock
+      issues (NTP/chrony, Layer 2) — by the end of this guide you will
+      know exactly what to fix.
+    </p>
+
+    <div class="diagnostic-step">
+      <h3><span class="step-number">1</span> Compare to other validators</h3>
+      <p>
+        Look at the <strong>X1 Labs foundation pipeline trend</strong>
+        chart and the <strong>Vote pipeline latency over time</strong>
+        chart. Is your offset elevated while the foundation cluster and
+        top-100 stake validators are also elevated?
+      </p>
+      <div class="diagnostic-cases">
+        <div class="case case-network-wide">
+          <h4>Case A — Network-wide elevation</h4>
+          <p>
+            <strong>Diagnosis:</strong> Chain-wide pipeline event. X1
+            Labs operational change, network stress, leader skips, or
+            load test.
+          </p>
+          <p>
+            <strong>Action:</strong> Wait. Your validator is fine; the
+            protocol is experiencing turbulence. Baseline typically
+            returns within hours. Watch the foundation chart for
+            confirmation that the cluster recovers together.
+          </p>
+        </div>
+        <div class="case case-isolated">
+          <h4>Case B — Only your validator elevated</h4>
+          <p>
+            <strong>Diagnosis:</strong> Your specific node has an issue.
+          </p>
+          <p>
+            <strong>Action:</strong> Continue to Step 2 to determine
+            whether it&rsquo;s pipeline or clock.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="diagnostic-step">
+      <h3><span class="step-number">2</span> Check the magnitude</h3>
+      <p>
+        Look at <em>your</em> validator&rsquo;s drift in the
+        <strong>Anomalies &amp; deviations</strong> section on the
+        dashboard. The magnitude band tells you which subsystem to
+        investigate.
+      </p>
+
+      <div class="diagnostic-tiers">
+        <div class="tier tier-ok">
+          <h4>✅ |drift| &lt; 500 ms — Normal pipeline</h4>
+          <p>No action needed. Your validator is performing correctly. The remaining sections of this guide do not apply.</p>
+        </div>
+
+        <div class="tier tier-slow">
+          <h4>⚠️ 500 ms ≤ |drift| &lt; 5 s — Pipeline anomaly (Tier 1)</h4>
+          <p>
+            <strong>This is NOT a clock issue.</strong> Your chrony/NTP
+            is fine; the problem is somewhere in your vote pipeline:
+          </p>
+          <ul>
+            <li>Slow network connection or packet loss</li>
+            <li>CPU saturation during voting</li>
+            <li>Geographic distance from current leader rotation</li>
+            <li>Suboptimal Tachyon configuration</li>
+            <li>Insufficient gossip peer connections</li>
+          </ul>
+          <p><strong>Diagnostic commands:</strong></p>
+          <pre><code># Check leader proximity
+solana-validator leader-schedule --output json | head
+
+# Network round-trip to gossip peers
+ping -c 10 &lt;known-leader-ip&gt;
+
+# CPU / memory load
+top -bn1 | head -5
+iostat -x 1 5
+
+# Network connections (Solana gossip / TPU / TVU)
+ss -tuln | grep -E '(8000|8001|8003)'</code></pre>
+          <p><strong>Investigation steps:</strong></p>
+          <ol>
+            <li>Verify gossip peer count is healthy (typically 50+ active peers).</li>
+            <li>Monitor CPU during voting — should stay below 70 % sustained.</li>
+            <li>Check whether your VPS provider has bandwidth caps active.</li>
+            <li>Consider geographic relocation closer to cluster center.</li>
+            <li>Review Tachyon config for tuning opportunities.</li>
+          </ol>
+        </div>
+
+        <div class="tier tier-drift">
+          <h4>🔴 |drift| ≥ 5 s — Clock drift (Tier 2)</h4>
+          <p>
+            <strong>This IS a clock issue.</strong> Your system time is
+            wrong. Operator action is required.
+          </p>
+          <p><strong>Diagnostic commands:</strong></p>
+          <pre><code># Check current chrony status
+chronyc tracking
+# Should show: stratum 1-3, last offset &lt; 50 ms
+
+# List time sources
+chronyc sources -v
+# Should show 3+ sources in "combined" or "selected" state
+
+# System NTP status
+timedatectl status
+# Should show: NTP service: active, NTP synchronized: yes
+
+# Check for systemd-timesyncd conflict
+systemctl status systemd-timesyncd
+# If active, this conflicts with chrony — disable it</code></pre>
+          <p><strong>Fix steps:</strong></p>
+          <ol>
+            <li>If <code>systemd-timesyncd</code> is active, disable it: <code>sudo systemctl disable --now systemd-timesyncd</code></li>
+            <li>
+              Configure chrony with multiple stratum-1 sources. Edit
+              <code>/etc/chrony/chrony.conf</code>:
+              <pre><code>server ptbtime1.ptb.de iburst
+server tempus1.gum.gov.pl iburst
+server time.nist.gov iburst
+pool pool.ntp.org iburst maxsources 4</code></pre>
+            </li>
+            <li>Restart chrony: <code>sudo systemctl restart chrony</code></li>
+            <li>Verify firewall allows outbound UDP 123: <code>sudo ufw allow out 123/udp</code></li>
+            <li>Wait 1–2 hours for chrony to converge to atomic-level accuracy.</li>
+            <li>
+              Re-run <code>chronyc tracking</code> — last offset should
+              drop to &lt; 50 ms within an hour.
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="diagnostic-step">
+      <h3><span class="step-number">3</span> Verify the fix</h3>
+      <p>
+        After making changes, watch your validator on this dashboard for
+        30+ minutes. The drift should drop into the normal range and
+        the severity badge should change:
+      </p>
+      <p class="severity-flow">🔴 Layer 2 drift &rarr; ⚠️ Slow pipeline &rarr; ✅ Normal pipeline</p>
+      <p>
+        If drift persists after Step 2 fixes for Tier 2 (clock issue),
+        your problem is likely Tier 1 (infrastructure) misclassified due
+        to extreme network delay. Investigate per Tier 1 steps above.
+      </p>
+      <p>
+        If drift persists after Step 2 fixes for Tier 1 (infrastructure),
+        and you have ruled out chrony, contact the X1 community on
+        Telegram with your validator pubkey and the timestamps where
+        you see elevated drift. Foundation may have additional context.
+      </p>
+    </div>
+  </section>
 
   <h2>Limitations &amp; caveats</h2>
   <ul>
