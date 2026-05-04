@@ -40,6 +40,10 @@ const I18N = {
     // v1.0.0 Network chart — pipeline-latency framing
     chart_history_title: 'Vote pipeline latency over time (5-minute buckets)',
     chart_history_help: 'Aggregate vote-to-block latency across all voting validators. Stable ~-800 ms = healthy Tachyon protocol. Sudden swings = network stress, deployments, or load events.',
+    // v1.2.0: dynamic subtitle — {bucketLabel} swapped for the active
+    // aggregation interval ("5-min" / "10-min" / "15-min" / "30-min")
+    // so users can tell which resolution they're looking at.
+    chart_history_subtitle_template: 'Aggregate vote-to-block latency · {bucketLabel} buckets · stable ~-800 ms = healthy Tachyon protocol; sudden swings = stress, deployments, load events.',
     chart_history_median: 'X1 median lag',
     chart_history_stake: 'X1 stake-weighted lag',
     chart_history_sentinel: 'Sentinel offset (ms)',
@@ -227,6 +231,7 @@ const I18N = {
     // v1.0.0 Wykres sieci — narracja pipeline
     chart_history_title: 'Opóźnienie pipeline w czasie (kubełki 5-minutowe)',
     chart_history_help: 'Zagregowane opóźnienie vote-do-bloku dla wszystkich głosujących walidatorów. Stabilne ~-800 ms = zdrowy protokół Tachyon. Nagłe wahania = stres sieci, deploymenty, lub load testy.',
+    chart_history_subtitle_template: 'Zagregowane opóźnienie vote-do-bloku · kubełki {bucketLabel} · stabilne ~-800 ms = zdrowy protokół Tachyon; nagłe wahania = stres, deploymenty, load testy.',
     chart_history_median: 'Mediana opóźnienia X1',
     chart_history_stake: 'Opóźnienie ważone stakiem',
     chart_history_sentinel: 'Odchylenie Sentinela (ms)',
@@ -424,6 +429,65 @@ const state = {
 const NETWORK_OUTLIER_THRESHOLD_MS = 5000;
 const VALID_WINDOW_DAYS = [2, 4, 6, 12];
 
+// v1.2.0: adaptive bucket aggregation — at 4d/6d/12d windows the raw
+// 5-min buckets exceed the chart canvas pixel count (~1100 px), so
+// consecutive lines become vertical "shading" instead of readable curves.
+// We aggregate to a target of ~576 datapoints per chart by grouping
+// raw 5-min buckets. 2d window stays raw (576 buckets fits cleanly).
+//
+// `sourceBuckets` = how many raw 5-min buckets get averaged into one
+// chart point. `label` = human-readable bucket interval rendered into
+// the chart subtitle so users can tell what aggregation level they're
+// looking at.
+const BUCKET_AGGREGATION = {
+  2:  { sourceBuckets: 1, label: '5-min'  },  // 576 datapoints — raw
+  4:  { sourceBuckets: 2, label: '10-min' },  // 576 datapoints
+  6:  { sourceBuckets: 3, label: '15-min' },  // 576 datapoints
+  12: { sourceBuckets: 6, label: '30-min' },  // 576 datapoints
+};
+
+// v1.2.0: collapse `groupSize` consecutive raw buckets into one. Each
+// numeric field is averaged across the group, except `n_samples` which
+// is summed (it's a count, not a rate). Nulls are skipped per field, so
+// a group with one missing sentinel reading still yields a numeric
+// sentinel offset for the rest of the group. Group anchor (bucket_ts /
+// bucket_iso) is the FIRST raw bucket of the group — Chart.js places
+// each group at that timestamp on the x-axis, which matches what
+// "30-min bucket starting at 14:00" intuitively means.
+function aggregateBuckets(rawBuckets, groupSize) {
+  if (groupSize <= 1) return rawBuckets;
+  const meanField = (group, field) => {
+    const values = group
+      .map((b) => b[field])
+      .filter((v) => typeof v === 'number');
+    return values.length > 0
+      ? values.reduce((a, b) => a + b, 0) / values.length
+      : null;
+  };
+  const sumField = (group, field) => {
+    const values = group
+      .map((b) => b[field])
+      .filter((v) => typeof v === 'number');
+    return values.length > 0 ? values.reduce((a, b) => a + b, 0) : null;
+  };
+  const out = [];
+  for (let i = 0; i < rawBuckets.length; i += groupSize) {
+    const group = rawBuckets.slice(i, i + groupSize);
+    if (group.length === 0) continue;
+    out.push({
+      bucket_ts: group[0].bucket_ts,
+      bucket_iso: group[0].bucket_iso,
+      median_drift_ms: meanField(group, 'median_drift_ms'),
+      mean_drift_ms: meanField(group, 'mean_drift_ms'),
+      stake_weighted_drift_ms: meanField(group, 'stake_weighted_drift_ms'),
+      sentinel_offset_us: meanField(group, 'sentinel_offset_us'),
+      n_validators: meanField(group, 'n_validators'),
+      n_samples: sumField(group, 'n_samples'),
+    });
+  }
+  return out;
+}
+
 const el = {};
 function bindElements() {
   el.updatedTs = document.getElementById('updated-ts');
@@ -475,6 +539,8 @@ function bindElements() {
   el.chartYClampedNote = document.getElementById('chart-y-clamped-note');
   el.networkOutlierAlert = document.getElementById('network-outlier-alert');
   el.networkOutlierAlertList = document.getElementById('network-outlier-alert-list');
+  // v1.2.0: dynamic chart subtitle (bucket-aggregation interval)
+  el.chartHistorySubtitle = document.getElementById('chart-history-subtitle');
   el.nClusters = document.getElementById('n-clusters');
   el.nClustered = document.getElementById('n-clustered');
   el.nClusteredPct = document.getElementById('n-clustered-pct');
@@ -947,6 +1013,15 @@ function renderHistoryChart() {
     data = all.filter((d) => (d.bucket_ts || 0) >= cutoffTs);
   }
 
+  // v1.2.0: client-side bucket aggregation. The wider the window, the
+  // more raw 5-min buckets we'd render — at 12d that's 3456 datapoints
+  // for a ~1100 px canvas. Group them into wider buckets so each
+  // datapoint gets ~2 px of horizontal space. Outlier detection +
+  // y-axis clamping all work on the aggregated series, which keeps the
+  // outlier-alert list and the chart consistent with each other.
+  const aggregation = BUCKET_AGGREGATION[days] || { sourceBuckets: 1, label: '5-min' };
+  data = aggregateBuckets(data, aggregation.sourceBuckets);
+
   const labels = data.map((d) => d.bucket_iso);
   const median = data.map((d) => d.median_drift_ms);
   const stakeW = data.map((d) => d.stake_weighted_drift_ms);
@@ -1031,24 +1106,49 @@ function renderHistoryChart() {
     outlierIndexSet.has(i) ? '#f85149' : 'rgba(0,0,0,0)',
   );
 
+  // v1.2.0: lighter alpha on median + stake-weighted creates a "band"
+  // effect where the eye reads the two X1 series as a single envelope
+  // around the typical pipeline lag, rather than as two competing lines
+  // fighting for attention. Sentinel stays at full alpha + slightly
+  // thicker stroke since it's the reference (atomic-disciplined) line
+  // operators trust as ground truth.
   const sentinelLabel = t.chart_history_sentinel;
   const datasets = [
     {
       label: t.chart_history_median,
       data: median,
-      borderColor: '#58a6ff',
-      backgroundColor: 'transparent',
+      borderColor: 'rgba(88, 166, 255, 0.95)',
+      backgroundColor: 'rgba(88, 166, 255, 0.10)',
       pointRadius: markerPointRadius,
       pointStyle: markerPointStyle,
       pointBackgroundColor: markerPointColor,
       pointBorderColor: markerPointColor,
       pointHoverRadius: 6,
-      borderWidth: 1.5,
-      tension: 0.2,
+      borderWidth: 1.2,
+      tension: 0.15,
       yAxisID: 'yLeft',
     },
-    { label: t.chart_history_stake, data: stakeW, borderColor: '#3fb950', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yLeft' },
-    { label: sentinelLabel, data: sentinel, borderColor: '#d29922', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, tension: 0.2, yAxisID: 'yLeft', spanGaps: true },
+    {
+      label: t.chart_history_stake,
+      data: stakeW,
+      borderColor: 'rgba(63, 185, 80, 0.85)',
+      backgroundColor: 'rgba(63, 185, 80, 0.08)',
+      pointRadius: 0,
+      borderWidth: 1.2,
+      tension: 0.15,
+      yAxisID: 'yLeft',
+    },
+    {
+      label: sentinelLabel,
+      data: sentinel,
+      borderColor: 'rgba(210, 153, 34, 0.95)',
+      backgroundColor: 'transparent',
+      pointRadius: 0,
+      borderWidth: 1.5,
+      tension: 0,
+      yAxisID: 'yLeft',
+      spanGaps: true,
+    },
   ];
 
   // v0.7.0: y-axis scale config — explicit min/max only when clamping.
@@ -1103,6 +1203,14 @@ function renderHistoryChart() {
   // doesn't carry stale text.
   if (el.chartYClampedNote) {
     el.chartYClampedNote.hidden = state.showOutliers;
+  }
+  // v1.2.0: surface the current bucket aggregation interval in the
+  // chart subtitle so the user can tell at a glance whether they're
+  // looking at raw 5-min buckets (2d) or 30-min buckets (12d). Replaces
+  // the placeholder text the i18n applier puts in.
+  if (el.chartHistorySubtitle && t.chart_history_subtitle_template) {
+    el.chartHistorySubtitle.textContent =
+      t.chart_history_subtitle_template.replace('{bucketLabel}', aggregation.label);
   }
 }
 
