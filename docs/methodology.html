@@ -190,269 +190,544 @@
     font-family: var(--mono);
     font-size: 14px;
   }
+
+  /* v1.2.0 — bilingual content (EN/PL toggle).
+     Strategy: each prose block is duplicated with a `lang` attribute,
+     and CSS hides the descendant whose lang doesn't match the current
+     html.lang. This keeps the code-block / `<pre>` content (which is
+     untranslated terminal commands) outside the language switch — the
+     spec asks us to translate prose only.
+
+     We hide only descendants of html with the OTHER lang attribute,
+     so the html element itself (which carries lang="en"/lang="pl") is
+     never targeted by display:none. */
+  html[lang="en"] [lang="pl"] { display: none !important; }
+  html[lang="pl"] [lang="en"] { display: none !important; }
+
+  .lang-toggle-fixed {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 100;
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+  .lang-toggle-fixed button {
+    background: transparent;
+    color: var(--text-dim);
+    border: 0;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+  }
+  .lang-toggle-fixed button:hover { color: var(--text); }
+  .lang-toggle-fixed button.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
 </style>
 </head>
 <body>
+
+<div class="lang-toggle-fixed" role="group" aria-label="Language">
+  <button id="doc-lang-en" type="button" class="active">🇬🇧 EN</button>
+  <button id="doc-lang-pl" type="button">🇵🇱 PL</button>
+</div>
+
 <div class="doc">
 
-  <a href="../index.html" class="nav-back">← Back to dashboard</a>
+  <a href="../index.html" class="nav-back" lang="en">← Back to dashboard</a>
+  <a href="../index.html" class="nav-back" lang="pl">← Powrót do dashboardu</a>
 
-  <h1>X1-ClockDrift — Methodology</h1>
-  <p style="color: var(--text-dim); font-size: 14px; margin-top: 0;">
-    How this dashboard interprets time signals on the X1 blockchain — and
-    why distinguishing pipeline latency from clock drift matters.
-  </p>
+  <div lang="en">
+    <h1>X1-ClockDrift — Methodology</h1>
+    <p style="color: var(--text-dim); font-size: 14px; margin-top: 0;">
+      How this dashboard interprets time signals on the X1 blockchain — and
+      why distinguishing pipeline latency from clock drift matters.
+    </p>
+  </div>
+  <div lang="pl">
+    <h1>X1-ClockDrift — Metodologia</h1>
+    <p style="color: var(--text-dim); font-size: 14px; margin-top: 0;">
+      Jak ten dashboard interpretuje sygnały czasu na blockchainie X1 —
+      i dlaczego rozróżnienie opóźnienia pipeline od dryfu zegara ma
+      znaczenie.
+    </p>
+  </div>
 
-  <h2>What this dashboard measures</h2>
-  <p>
-    X1-ClockDrift monitors <strong>two distinct layers</strong> affecting
-    time on the X1 blockchain:
-  </p>
-  <ul>
-    <li><span class="layer-tag layer-1">Layer 1</span><strong>Vote pipeline latency</strong> — ~400-850 ms baseline, inherent to Tachyon protocol</li>
-    <li><span class="layer-tag layer-2">Layer 2</span><strong>Clock drift</strong> — rare, but operationally relevant</li>
-  </ul>
-  <p>
-    These are different phenomena with different causes and different
-    fixes. Conflating them — as earlier versions of this dashboard did —
-    produces misleading conclusions. The v1.0.0 refactor explicitly
-    separates the two so each gets the framing it deserves.
-  </p>
+  <div lang="en">
+    <h2>What this dashboard measures</h2>
+    <p>
+      X1-ClockDrift monitors <strong>two distinct layers</strong> affecting
+      time on the X1 blockchain:
+    </p>
+    <ul>
+      <li><span class="layer-tag layer-1">Layer 1</span><strong>Vote pipeline latency</strong> — ~400-850 ms baseline, inherent to Tachyon protocol</li>
+      <li><span class="layer-tag layer-2">Layer 2</span><strong>Clock drift</strong> — rare, but operationally relevant</li>
+    </ul>
+    <p>
+      These are different phenomena with different causes and different
+      fixes. Conflating them — as earlier versions of this dashboard did —
+      produces misleading conclusions. The v1.0.0 refactor explicitly
+      separates the two so each gets the framing it deserves.
+    </p>
+  </div>
+  <div lang="pl">
+    <h2>Co mierzy ten dashboard</h2>
+    <p>
+      X1-ClockDrift monitoruje <strong>dwie odrębne warstwy</strong>
+      wpływające na czas na blockchainie X1:
+    </p>
+    <ul>
+      <li><span class="layer-tag layer-1">Layer 1</span><strong>Opóźnienie pipeline głosowania</strong> — baseline ~400-850 ms, nieodłączny dla protokołu Tachyon</li>
+      <li><span class="layer-tag layer-2">Layer 2</span><strong>Dryf zegara</strong> — rzadki, ale operacyjnie istotny</li>
+    </ul>
+    <p>
+      To są różne zjawiska o różnych przyczynach i różnych
+      rozwiązaniach. Ich mylenie — jak robiły wcześniejsze wersje tego
+      dashboardu — prowadzi do błędnych wniosków. Refaktor v1.0.0
+      jednoznacznie rozdziela te dwa zjawiska, żeby każde dostało
+      odpowiednią narrację.
+    </p>
+  </div>
 
-  <h2><span class="layer-tag layer-1">Layer 1</span>Vote pipeline latency</h2>
-  <p>
-    Every vote on Tachyon (the Solana fork powering X1) goes through a
-    pipeline:
-  </p>
-  <ol>
-    <li>Validator creates vote (timestamp = local UTC) — ~50-100 ms signing &amp; serialization</li>
-    <li>Vote propagates via gossip to the current leader — ~200-400 ms</li>
-    <li>Leader packs vote into next block — ~100-200 ms</li>
-    <li>Block finalized and visible on-chain — ~50-150 ms</li>
-  </ol>
-  <p>
-    <strong>Total: ~400-850 ms.</strong> This is inherent to the protocol
-    — not a bug, not something operators can &ldquo;fix&rdquo;.
-  </p>
-  <p>
-    When this dashboard shows the X1 chain as &ldquo;-800 ms behind real
-    UTC&rdquo;, it is measuring this pipeline latency, not validator
-    clock errors.
-  </p>
-  <h3>Proof this is protocol-level, not clock drift</h3>
-  <p>
-    All 12 X1 Labs foundation nodes show identical -842 to -844 ms
-    offset. If their clocks were misconfigured, each would show
-    different values. <strong>Identical signatures across well-managed
-    nodes prove the offset comes from the protocol, not the
-    operators.</strong>
-  </p>
-  <blockquote>
-    Theo (X1 Labs), on the Layer 1/Layer 2 distinction (personal
-    communication, X1 Labs Telegram): &ldquo;If it were clock drift,
-    every validator would have different offset. Identical signal =
-    pipeline, not drift.&rdquo;
-  </blockquote>
+  <div lang="en">
+    <h2><span class="layer-tag layer-1">Layer 1</span>Vote pipeline latency</h2>
+    <p>
+      Every vote on Tachyon (the Solana fork powering X1) goes through a
+      pipeline:
+    </p>
+    <ol>
+      <li>Validator creates vote (timestamp = local UTC) — ~50-100 ms signing &amp; serialization</li>
+      <li>Vote propagates via gossip to the current leader — ~200-400 ms</li>
+      <li>Leader packs vote into next block — ~100-200 ms</li>
+      <li>Block finalized and visible on-chain — ~50-150 ms</li>
+    </ol>
+    <p>
+      <strong>Total: ~400-850 ms.</strong> This is inherent to the protocol
+      — not a bug, not something operators can &ldquo;fix&rdquo;.
+    </p>
+    <p>
+      When this dashboard shows the X1 chain as &ldquo;-800 ms behind real
+      UTC&rdquo;, it is measuring this pipeline latency, not validator
+      clock errors.
+    </p>
+    <h3>Proof this is protocol-level, not clock drift</h3>
+    <p>
+      All 12 X1 Labs foundation nodes show identical -842 to -844 ms
+      offset. If their clocks were misconfigured, each would show
+      different values. <strong>Identical signatures across well-managed
+      nodes prove the offset comes from the protocol, not the
+      operators.</strong>
+    </p>
+    <blockquote>
+      Theo (X1 Labs), on the Layer 1/Layer 2 distinction (personal
+      communication, X1 Labs Telegram): &ldquo;If it were clock drift,
+      every validator would have different offset. Identical signal =
+      pipeline, not drift.&rdquo;
+    </blockquote>
+  </div>
+  <div lang="pl">
+    <h2><span class="layer-tag layer-1">Layer 1</span>Opóźnienie pipeline głosowania</h2>
+    <p>
+      Każdy vote na Tachyonie (forku Solany na której działa X1)
+      przechodzi przez pipeline:
+    </p>
+    <ol>
+      <li>Walidator tworzy vote (timestamp = lokalny UTC) — ~50-100 ms podpisywanie i serializacja</li>
+      <li>Vote propaguje przez gossip do aktualnego leadera — ~200-400 ms</li>
+      <li>Leader pakuje vote do następnego bloku — ~100-200 ms</li>
+      <li>Blok finalizowany i widoczny on-chain — ~50-150 ms</li>
+    </ol>
+    <p>
+      <strong>Łącznie: ~400-850 ms.</strong> To jest nieodłączne dla
+      protokołu — nie bug, nie coś co operator może „naprawić".
+    </p>
+    <p>
+      Gdy ten dashboard pokazuje chain X1 jako „-800 ms za realnym UTC",
+      mierzy właśnie to opóźnienie pipeline, a nie błędy zegara
+      walidatorów.
+    </p>
+    <h3>Dowód że to poziom protokołu, nie dryf zegara</h3>
+    <p>
+      Wszystkie 12 nodów fundacji X1 Labs pokazuje identyczne
+      przesunięcie -842 do -844 ms. Gdyby ich zegary były źle
+      skonfigurowane, każdy pokazywałby inną wartość. <strong>Identyczne
+      sygnatury na dobrze zarządzanych nodach dowodzą, że przesunięcie
+      pochodzi z protokołu, a nie od operatorów.</strong>
+    </p>
+    <blockquote>
+      Theo (X1 Labs) o rozróżnieniu Layer 1 / Layer 2 (osobista
+      korespondencja, X1 Labs Telegram, oryginalnie po angielsku):
+      &ldquo;If it were clock drift, every validator would have
+      different offset. Identical signal = pipeline, not drift.&rdquo;
+    </blockquote>
+  </div>
 
-  <h2><span class="layer-tag layer-2">Layer 2</span>Clock drift</h2>
-  <p>
-    Some validators have genuinely broken NTP/chrony configurations.
-    Their system clocks drift by seconds or minutes from real UTC.
-    Examples observed on X1 mainnet:
-  </p>
-  <ul>
-    <li>One operator: -24 seconds drift</li>
-    <li>Several operators: -10 to -30 seconds</li>
-  </ul>
-  <p>
-    This <em>is</em> clock drift in the traditional sense. Operators
-    fix it by configuring chrony correctly with stratum-1 NTP sources.
-  </p>
-  <p>
-    <strong>Note:</strong> the Strontium oracle (a separate X1 Labs
-    project) corrects <code>Clock::unix_timestamp</code> at protocol
-    level so chain consumers see correct UTC time even when individual
-    validators drift. This dashboard observes the raw measurement before
-    that correction.
-  </p>
+  <div lang="en">
+    <h2><span class="layer-tag layer-2">Layer 2</span>Clock drift</h2>
+    <p>
+      Some validators have genuinely broken NTP/chrony configurations.
+      Their system clocks drift by seconds or minutes from real UTC.
+      Examples observed on X1 mainnet:
+    </p>
+    <ul>
+      <li>One operator: -24 seconds drift</li>
+      <li>Several operators: -10 to -30 seconds</li>
+    </ul>
+    <p>
+      This <em>is</em> clock drift in the traditional sense. Operators
+      fix it by configuring chrony correctly with stratum-1 NTP sources.
+    </p>
+    <p>
+      <strong>Note:</strong> the Strontium oracle (a separate X1 Labs
+      project) corrects <code>Clock::unix_timestamp</code> at protocol
+      level so chain consumers see correct UTC time even when individual
+      validators drift. This dashboard observes the raw measurement before
+      that correction.
+    </p>
+  </div>
+  <div lang="pl">
+    <h2><span class="layer-tag layer-2">Layer 2</span>Dryf zegara</h2>
+    <p>
+      Niektórzy walidatorzy mają faktycznie błędnie skonfigurowane
+      NTP/chrony. Ich zegary systemowe odchylają się od prawdziwego UTC
+      o sekundy lub minuty. Przykłady zaobserwowane na X1 mainnet:
+    </p>
+    <ul>
+      <li>Jeden operator: -24 sekundy dryfu</li>
+      <li>Kilku operatorów: -10 do -30 sekund</li>
+    </ul>
+    <p>
+      To <em>jest</em> dryf zegara w tradycyjnym sensie. Operatorzy
+      naprawiają to konfigurując chrony poprawnie ze źródłami NTP
+      stratum-1.
+    </p>
+    <p>
+      <strong>Uwaga:</strong> Strontium oracle (osobny projekt X1 Labs)
+      koryguje <code>Clock::unix_timestamp</code> na poziomie protokołu,
+      więc konsumenci chain widzą poprawny czas UTC nawet gdy
+      poszczególne walidatory dryfują. Ten dashboard obserwuje surowy
+      pomiar przed tą korekcją.
+    </p>
+  </div>
 
-  <h2>Quick reference</h2>
-  <table>
-    <thead>
-      <tr><th>Signal</th><th>Layer 1 — Pipeline</th><th>Layer 2 — Drift</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>Source</td><td>Tachyon vote consensus</td><td>Validator system clock</td></tr>
-      <tr><td>Magnitude</td><td>~400-850 ms</td><td>seconds to minutes</td></tr>
-      <tr><td>Per-validator pattern</td><td>Identical across well-synced nodes</td><td>Different per validator</td></tr>
-      <tr><td>Stable over time?</td><td>Yes (protocol-level)</td><td>Often grows / drifts</td></tr>
-      <tr><td>Operator can fix?</td><td>No (inherent to protocol)</td><td>Yes (NTP/chrony config)</td></tr>
-      <tr><td>This dashboard label</td><td><code>vote pipeline latency</code></td><td><code>clock drift</code></td></tr>
-    </tbody>
-  </table>
+  <div lang="en">
+    <h2>Quick reference</h2>
+    <table>
+      <thead>
+        <tr><th>Signal</th><th>Layer 1 — Pipeline</th><th>Layer 2 — Drift</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Source</td><td>Tachyon vote consensus</td><td>Validator system clock</td></tr>
+        <tr><td>Magnitude</td><td>~400-850 ms</td><td>seconds to minutes</td></tr>
+        <tr><td>Per-validator pattern</td><td>Identical across well-synced nodes</td><td>Different per validator</td></tr>
+        <tr><td>Stable over time?</td><td>Yes (protocol-level)</td><td>Often grows / drifts</td></tr>
+        <tr><td>Operator can fix?</td><td>No (inherent to protocol)</td><td>Yes (NTP/chrony config)</td></tr>
+        <tr><td>This dashboard label</td><td><code>vote pipeline latency</code></td><td><code>clock drift</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div lang="pl">
+    <h2>Szybka ściągawka</h2>
+    <table>
+      <thead>
+        <tr><th>Sygnał</th><th>Layer 1 — Pipeline</th><th>Layer 2 — Dryf</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Źródło</td><td>Konsensus vote Tachyon</td><td>Zegar systemowy walidatora</td></tr>
+        <tr><td>Skala</td><td>~400-850 ms</td><td>sekundy do minut</td></tr>
+        <tr><td>Wzorzec per walidator</td><td>Identyczny na dobrze zsynchronizowanych nodach</td><td>Różny per walidator</td></tr>
+        <tr><td>Stabilny w czasie?</td><td>Tak (poziom protokołu)</td><td>Często rośnie / dryfuje</td></tr>
+        <tr><td>Operator może naprawić?</td><td>Nie (nieodłączne dla protokołu)</td><td>Tak (konfiguracja NTP/chrony)</td></tr>
+        <tr><td>Etykieta na tym dashboardzie</td><td><code>vote pipeline latency</code></td><td><code>clock drift</code></td></tr>
+      </tbody>
+    </table>
+  </div>
 
-  <h2>How to read each section</h2>
+  <div lang="en">
+    <h2>How to read each section</h2>
 
-  <h3>X1 vote pipeline latency vs UTC (top hero card)</h3>
-  <p>
-    Shows current chain pipeline lag. Stable ~-800 ms = healthy. Sudden
-    swings or values &gt; 2 s = network stress, deployments, or load
-    events.
-  </p>
-
-  <h3>Validator pipeline health (4-card breakdown)</h3>
-  <ul>
-    <li><strong>Normal pipeline</strong> (|deviation| &lt; 500 ms): healthy validators</li>
-    <li><strong>Slow pipeline</strong> (500 ms – 5 s): elevated latency, investigate network/CPU</li>
-    <li><strong>Clock drift</strong> (|drift| ≥ 5 s): genuine Layer 2 issue, operator action needed</li>
-    <li><strong>X1 Labs</strong>: foundation baseline reference (12 nodes)</li>
-  </ul>
-
-  <h3>Vote pipeline latency over time (chart)</h3>
-  <p>
-    Aggregate latency across the network. Watch for:
-  </p>
-  <ul>
-    <li>Sudden shifts &gt; 200 ms in foundation baseline = X1 Labs operational change</li>
-    <li>Spikes &gt; 5 seconds = chain-time anomaly (load event, leader skips, deployment)</li>
-  </ul>
-
-  <h3>Anomalies &amp; deviations (split tables)</h3>
-  <ul>
-    <li><strong>Tier 1 — Pipeline anomalies:</strong> 500 ms ≤ |lag| &lt; 5 s. Slow but not drift; infra investigation territory.</li>
-    <li><strong>Tier 2 — Clock drift:</strong> |drift| ≥ 5 s. Real misconfiguration; operator must fix NTP/chrony.</li>
-  </ul>
-
-  <h2>Measurement methodology</h2>
-
-  <h3>Reference clock</h3>
-  <p>
-    The Sentinel server (the host running this daemon) synchronizes via
-    chrony to multiple stratum-1 atomic time sources:
-  </p>
-  <ul>
-    <li>PTB Germany (<code>ptbtime1-3.ptb.de</code>)</li>
-    <li>GUM Poland (<code>tempus1-3.gum.gov.pl</code>)</li>
-    <li>CESNET Czechia (<code>tak.cesnet.cz</code>, <code>tik.cesnet.cz</code>)</li>
-    <li>Netnod Sweden (<code>sth1-2.ntp.netnod.se</code>)</li>
-  </ul>
-  <p>
-    Sentinel offset to UTC consensus is typically ±50 µs with RMS ~30 µs.
-    This is atomic-level precision — far below any threshold relevant
-    for this dashboard&rsquo;s measurements.
-  </p>
-
-  <h3>Drift / lag calculation</h3>
-  <pre><code>drift_ms = (vote_timestamp_in_chain_ms) − (sentinel_local_observation_ms)</code></pre>
-  <p>
-    For each vote on-chain, we record:
-  </p>
-  <dl>
-    <dt><code>ts_chain</code></dt>
-    <dd>timestamp the validator wrote in their <code>Vote</code> instruction (local UTC at vote-creation time)</dd>
-    <dt><code>ts_local_us</code></dt>
-    <dd>when the Sentinel observed the slot containing that vote (microsecond precision, atomic-disciplined clock)</dd>
-  </dl>
-  <p>
-    The difference is the validator&rsquo;s pipeline latency (if in
-    normal range) or clock drift (if extreme).
-  </p>
-
-  <h3>Aggregation</h3>
-  <p>
-    5-minute buckets, computed via SQL median/mean over all votes from
-    each validator in the bucket. Validators with &lt;100 samples in 24 h
-    are excluded from the &ldquo;top pipeline efficient&rdquo; ranking
-    to avoid statistical noise. The Anomalies tables use a softer floor
-    (≥20 samples) so early operational signals aren&rsquo;t suppressed.
-  </p>
-
-  <h3>Foundation cluster</h3>
-  <p>
-    12 X1 Labs operated nodes (verified via <a href="https://x1val.online" target="_blank" rel="noreferrer noopener">x1val.online</a> listings) shown
-    separately because their drift is operational baseline, not
-    validator misconfiguration. The foundation pipeline trend chart
-    over 14 days is the most sensitive indicator of X1 Labs operational
-    changes — sudden &gt;100 ms shifts in the avg-lag line correspond
-    to Tachyon config changes, NTP source swaps, or deployments.
-  </p>
-
-  <section class="diagnostic-guide" id="diagnostic-guide">
-    <h2>Diagnosing your validator</h2>
-    <p class="lead">
-      If your validator shows elevated drift on this dashboard, walk
-      through these steps to identify the cause. The dashboard
-      distinguishes pipeline issues (network/infra, Layer 1) from clock
-      issues (NTP/chrony, Layer 2) — by the end of this guide you will
-      know exactly what to fix.
+    <h3>X1 vote pipeline latency vs UTC (top hero card)</h3>
+    <p>
+      Shows current chain pipeline lag. Stable ~-800 ms = healthy. Sudden
+      swings or values &gt; 2 s = network stress, deployments, or load
+      events.
     </p>
 
-    <div class="diagnostic-step">
-      <h3><span class="step-number">1</span> Compare to other validators</h3>
-      <p>
-        Look at the <strong>X1 Labs foundation pipeline trend</strong>
-        chart and the <strong>Vote pipeline latency over time</strong>
-        chart. Is your offset elevated while the foundation cluster and
-        top-100 stake validators are also elevated?
+    <h3>Validator pipeline health (4-card breakdown)</h3>
+    <ul>
+      <li><strong>Normal pipeline</strong> (|deviation| &lt; 500 ms): healthy validators</li>
+      <li><strong>Slow pipeline</strong> (500 ms – 5 s): elevated latency, investigate network/CPU</li>
+      <li><strong>Clock drift</strong> (|drift| ≥ 5 s): genuine Layer 2 issue, operator action needed</li>
+      <li><strong>X1 Labs</strong>: foundation baseline reference (12 nodes)</li>
+    </ul>
+
+    <h3>Vote pipeline latency over time (chart)</h3>
+    <p>
+      Aggregate latency across the network. Watch for:
+    </p>
+    <ul>
+      <li>Sudden shifts &gt; 200 ms in foundation baseline = X1 Labs operational change</li>
+      <li>Spikes &gt; 5 seconds = chain-time anomaly (load event, leader skips, deployment)</li>
+    </ul>
+
+    <h3>Anomalies &amp; deviations (split tables)</h3>
+    <ul>
+      <li><strong>Tier 1 — Pipeline anomalies:</strong> 500 ms ≤ |lag| &lt; 5 s. Slow but not drift; infra investigation territory.</li>
+      <li><strong>Tier 2 — Clock drift:</strong> |drift| ≥ 5 s. Real misconfiguration; operator must fix NTP/chrony.</li>
+    </ul>
+  </div>
+  <div lang="pl">
+    <h2>Jak czytać każdą sekcję</h2>
+
+    <h3>X1 vote pipeline latency vs UTC (górna karta hero)</h3>
+    <p>
+      Pokazuje aktualne opóźnienie pipeline chainu. Stabilne ~-800 ms =
+      zdrowo. Nagłe wahania lub wartości &gt; 2 s = stres sieci,
+      deploymenty, lub load testy.
+    </p>
+
+    <h3>Validator pipeline health (rozkład na 4 karty)</h3>
+    <ul>
+      <li><strong>Pipeline normalny</strong> (|odchylenie| &lt; 500 ms): zdrowe walidatory</li>
+      <li><strong>Pipeline wolny</strong> (500 ms – 5 s): podwyższone opóźnienie, sprawdź sieć/CPU</li>
+      <li><strong>Dryf zegara</strong> (|dryf| ≥ 5 s): realny problem Layer 2, wymagana akcja operatora</li>
+      <li><strong>X1 Labs</strong>: baseline fundacji (12 nodów)</li>
+    </ul>
+
+    <h3>Vote pipeline latency over time (wykres)</h3>
+    <p>
+      Zagregowane opóźnienie w skali sieci. Obserwuj:
+    </p>
+    <ul>
+      <li>Nagłe skoki &gt; 200 ms w baseline’ie fundacji = zmiana operacyjna X1 Labs</li>
+      <li>Spike’y &gt; 5 sekund = anomalia chain-time (load event, leader skips, deployment)</li>
+    </ul>
+
+    <h3>Anomalie i odchylenia (podzielone tabele)</h3>
+    <ul>
+      <li><strong>Tier 1 — Anomalie pipeline:</strong> 500 ms ≤ |opóźnienie| &lt; 5 s. Wolny, ale to nie dryf; obszar diagnostyki infry.</li>
+      <li><strong>Tier 2 — Dryf zegara:</strong> |dryf| ≥ 5 s. Realna błędna konfiguracja; operator musi naprawić NTP/chrony.</li>
+    </ul>
+  </div>
+
+  <div lang="en">
+    <h2>Measurement methodology</h2>
+
+    <h3>Reference clock</h3>
+    <p>
+      The Sentinel server (the host running this daemon) synchronizes via
+      chrony to multiple stratum-1 atomic time sources:
+    </p>
+    <ul>
+      <li>PTB Germany (<code>ptbtime1-3.ptb.de</code>)</li>
+      <li>GUM Poland (<code>tempus1-3.gum.gov.pl</code>)</li>
+      <li>CESNET Czechia (<code>tak.cesnet.cz</code>, <code>tik.cesnet.cz</code>)</li>
+      <li>Netnod Sweden (<code>sth1-2.ntp.netnod.se</code>)</li>
+    </ul>
+    <p>
+      Sentinel offset to UTC consensus is typically ±50 µs with RMS ~30 µs.
+      This is atomic-level precision — far below any threshold relevant
+      for this dashboard&rsquo;s measurements.
+    </p>
+
+    <h3>Drift / lag calculation</h3>
+    <pre><code>drift_ms = (vote_timestamp_in_chain_ms) − (sentinel_local_observation_ms)</code></pre>
+    <p>
+      For each vote on-chain, we record:
+    </p>
+    <dl>
+      <dt><code>ts_chain</code></dt>
+      <dd>timestamp the validator wrote in their <code>Vote</code> instruction (local UTC at vote-creation time)</dd>
+      <dt><code>ts_local_us</code></dt>
+      <dd>when the Sentinel observed the slot containing that vote (microsecond precision, atomic-disciplined clock)</dd>
+    </dl>
+    <p>
+      The difference is the validator&rsquo;s pipeline latency (if in
+      normal range) or clock drift (if extreme).
+    </p>
+
+    <h3>Aggregation</h3>
+    <p>
+      5-minute buckets, computed via SQL median/mean over all votes from
+      each validator in the bucket. Validators with &lt;100 samples in 24 h
+      are excluded from the &ldquo;top pipeline efficient&rdquo; ranking
+      to avoid statistical noise. The Anomalies tables use a softer floor
+      (≥20 samples) so early operational signals aren&rsquo;t suppressed.
+    </p>
+    <p>
+      <strong>Chart aggregation (v1.2.0):</strong> at wider window
+      selections (4 d / 6 d / 12 d) the dashboard groups consecutive raw
+      buckets client-side into 10-minute / 15-minute / 30-minute buckets
+      so the chart stays readable. The 2 d window keeps raw 5-minute
+      resolution. The current bucket interval is shown in the chart
+      subtitle.
+    </p>
+
+    <h3>Foundation cluster</h3>
+    <p>
+      12 X1 Labs operated nodes (verified via <a href="https://x1val.online" target="_blank" rel="noreferrer noopener">x1val.online</a> listings) shown
+      separately because their drift is operational baseline, not
+      validator misconfiguration. The foundation pipeline trend chart
+      over 14 days is the most sensitive indicator of X1 Labs operational
+      changes — sudden &gt;100 ms shifts in the avg-lag line correspond
+      to Tachyon config changes, NTP source swaps, or deployments.
+    </p>
+  </div>
+  <div lang="pl">
+    <h2>Metodologia pomiaru</h2>
+
+    <h3>Zegar referencyjny</h3>
+    <p>
+      Serwer Sentinel (host na którym działa ten daemon) synchronizuje
+      się przez chrony do wielu atomowych źródeł czasu stratum-1:
+    </p>
+    <ul>
+      <li>PTB Niemcy (<code>ptbtime1-3.ptb.de</code>)</li>
+      <li>GUM Polska (<code>tempus1-3.gum.gov.pl</code>)</li>
+      <li>CESNET Czechy (<code>tak.cesnet.cz</code>, <code>tik.cesnet.cz</code>)</li>
+      <li>Netnod Szwecja (<code>sth1-2.ntp.netnod.se</code>)</li>
+    </ul>
+    <p>
+      Odchylenie Sentinela od konsensusu UTC wynosi typowo ±50 µs z RMS
+      ~30 µs. To jest precyzja atomowa — daleko poniżej jakiegokolwiek
+      progu istotnego dla pomiarów tego dashboardu.
+    </p>
+
+    <h3>Obliczenie dryfu / opóźnienia</h3>
+    <pre><code>drift_ms = (vote_timestamp_in_chain_ms) − (sentinel_local_observation_ms)</code></pre>
+    <p>
+      Dla każdego vote on-chain rejestrujemy:
+    </p>
+    <dl>
+      <dt><code>ts_chain</code></dt>
+      <dd>timestamp który walidator zapisał w swojej instrukcji <code>Vote</code> (lokalny UTC w momencie tworzenia vote)</dd>
+      <dt><code>ts_local_us</code></dt>
+      <dd>moment w którym Sentinel zaobserwował slot zawierający ten vote (precyzja mikrosekundowa, zegar dyscyplinowany atomowo)</dd>
+    </dl>
+    <p>
+      Różnica to opóźnienie pipeline walidatora (jeśli w normalnym
+      zakresie) lub dryf zegara (jeśli skrajny).
+    </p>
+
+    <h3>Agregacja</h3>
+    <p>
+      Kubełki 5-minutowe, liczone przez SQL median/mean nad wszystkimi
+      vote’ami danego walidatora w kubełku. Walidatorzy z &lt;100
+      próbkami w 24 h są wykluczeni z rankingu „top pipeline efficient",
+      żeby uniknąć szumu statystycznego. Tabele Anomalii używają
+      łagodniejszego progu (≥20 próbek), żeby wczesne sygnały
+      operacyjne nie były tłumione.
+    </p>
+    <p>
+      <strong>Agregacja wykresu (v1.2.0):</strong> przy szerszych
+      oknach (4 d / 6 d / 12 d) dashboard grupuje sąsiadujące kubełki
+      po stronie klienta na 10-minutowe / 15-minutowe / 30-minutowe,
+      żeby wykres pozostał czytelny. Okno 2 d zachowuje surową
+      rozdzielczość 5-minutową. Aktualny interwał kubełka pokazany jest
+      w podtytule wykresu.
+    </p>
+
+    <h3>Klaster fundacji</h3>
+    <p>
+      12 nodów operowanych przez X1 Labs (zweryfikowanych przez listingi
+      <a href="https://x1val.online" target="_blank" rel="noreferrer noopener">x1val.online</a>) pokazane
+      osobno, ponieważ ich dryf to baseline operacyjny, a nie błędna
+      konfiguracja walidatora. Wykres trendu pipeline fundacji w 14
+      dniach jest najczulszym wskaźnikiem zmian operacyjnych X1 Labs —
+      nagłe skoki &gt;100 ms na linii średniego opóźnienia odpowiadają
+      zmianom konfiguracji Tachyona, podmianom źródła NTP, lub
+      deploymentom.
+    </p>
+  </div>
+
+  <section class="diagnostic-guide" id="diagnostic-guide">
+    <div lang="en">
+      <h2>Diagnosing your validator</h2>
+      <p class="lead">
+        If your validator shows elevated drift on this dashboard, walk
+        through these steps to identify the cause. The dashboard
+        distinguishes pipeline issues (network/infra, Layer 1) from clock
+        issues (NTP/chrony, Layer 2) — by the end of this guide you will
+        know exactly what to fix.
       </p>
-      <div class="diagnostic-cases">
-        <div class="case case-network-wide">
-          <h4>Case A — Network-wide elevation</h4>
-          <p>
-            <strong>Diagnosis:</strong> Chain-wide pipeline event. X1
-            Labs operational change, network stress, leader skips, or
-            load test.
-          </p>
-          <p>
-            <strong>Action:</strong> Wait. Your validator is fine; the
-            protocol is experiencing turbulence. Baseline typically
-            returns within hours. Watch the foundation chart for
-            confirmation that the cluster recovers together.
-          </p>
-        </div>
-        <div class="case case-isolated">
-          <h4>Case B — Only your validator elevated</h4>
-          <p>
-            <strong>Diagnosis:</strong> Your specific node has an issue.
-          </p>
-          <p>
-            <strong>Action:</strong> Continue to Step 2 to determine
-            whether it&rsquo;s pipeline or clock.
-          </p>
+
+      <div class="diagnostic-step">
+        <h3><span class="step-number">1</span> Compare to other validators</h3>
+        <p>
+          Look at the <strong>X1 Labs foundation pipeline trend</strong>
+          chart and the <strong>Vote pipeline latency over time</strong>
+          chart. Is your offset elevated while the foundation cluster and
+          top-100 stake validators are also elevated?
+        </p>
+        <div class="diagnostic-cases">
+          <div class="case case-network-wide">
+            <h4>Case A — Network-wide elevation</h4>
+            <p>
+              <strong>Diagnosis:</strong> Chain-wide pipeline event. X1
+              Labs operational change, network stress, leader skips, or
+              load test.
+            </p>
+            <p>
+              <strong>Action:</strong> Wait. Your validator is fine; the
+              protocol is experiencing turbulence. Baseline typically
+              returns within hours. Watch the foundation chart for
+              confirmation that the cluster recovers together.
+            </p>
+          </div>
+          <div class="case case-isolated">
+            <h4>Case B — Only your validator elevated</h4>
+            <p>
+              <strong>Diagnosis:</strong> Your specific node has an issue.
+            </p>
+            <p>
+              <strong>Action:</strong> Continue to Step 2 to determine
+              whether it&rsquo;s pipeline or clock.
+            </p>
+          </div>
         </div>
       </div>
-    </div>
 
-    <div class="diagnostic-step">
-      <h3><span class="step-number">2</span> Check the magnitude</h3>
-      <p>
-        Look at <em>your</em> validator&rsquo;s drift in the
-        <strong>Anomalies &amp; deviations</strong> section on the
-        dashboard. The magnitude band tells you which subsystem to
-        investigate.
-      </p>
+      <div class="diagnostic-step">
+        <h3><span class="step-number">2</span> Check the magnitude</h3>
+        <p>
+          Look at <em>your</em> validator&rsquo;s drift in the
+          <strong>Anomalies &amp; deviations</strong> section on the
+          dashboard. The magnitude band tells you which subsystem to
+          investigate.
+        </p>
 
-      <div class="diagnostic-tiers">
-        <div class="tier tier-ok">
-          <h4>✅ |drift| &lt; 500 ms — Normal pipeline</h4>
-          <p>No action needed. Your validator is performing correctly. The remaining sections of this guide do not apply.</p>
-        </div>
+        <div class="diagnostic-tiers">
+          <div class="tier tier-ok">
+            <h4>✅ |drift| &lt; 500 ms — Normal pipeline</h4>
+            <p>No action needed. Your validator is performing correctly. The remaining sections of this guide do not apply.</p>
+          </div>
 
-        <div class="tier tier-slow">
-          <h4>⚠️ 500 ms ≤ |drift| &lt; 5 s — Pipeline anomaly (Tier 1)</h4>
-          <p>
-            <strong>This is NOT a clock issue.</strong> Your chrony/NTP
-            is fine; the problem is somewhere in your vote pipeline:
-          </p>
-          <ul>
-            <li>Slow network connection or packet loss</li>
-            <li>CPU saturation during voting</li>
-            <li>Geographic distance from current leader rotation</li>
-            <li>Suboptimal Tachyon configuration</li>
-            <li>Insufficient gossip peer connections</li>
-          </ul>
-          <p><strong>Diagnostic commands:</strong></p>
-          <pre><code># Check leader proximity
+          <div class="tier tier-slow">
+            <h4>⚠️ 500 ms ≤ |drift| &lt; 5 s — Pipeline anomaly (Tier 1)</h4>
+            <p>
+              <strong>This is NOT a clock issue.</strong> Your chrony/NTP
+              is fine; the problem is somewhere in your vote pipeline:
+            </p>
+            <ul>
+              <li>Slow network connection or packet loss</li>
+              <li>CPU saturation during voting</li>
+              <li>Geographic distance from current leader rotation</li>
+              <li>Suboptimal Tachyon configuration</li>
+              <li>Insufficient gossip peer connections</li>
+            </ul>
+            <p><strong>Diagnostic commands:</strong></p>
+            <pre><code># Check leader proximity
 solana-validator leader-schedule --output json | head
 
 # Network round-trip to gossip peers
@@ -464,24 +739,24 @@ iostat -x 1 5
 
 # Network connections (Solana gossip / TPU / TVU)
 ss -tuln | grep -E '(8000|8001|8003)'</code></pre>
-          <p><strong>Investigation steps:</strong></p>
-          <ol>
-            <li>Verify gossip peer count is healthy (typically 50+ active peers).</li>
-            <li>Monitor CPU during voting — should stay below 70 % sustained.</li>
-            <li>Check whether your VPS provider has bandwidth caps active.</li>
-            <li>Consider geographic relocation closer to cluster center.</li>
-            <li>Review Tachyon config for tuning opportunities.</li>
-          </ol>
-        </div>
+            <p><strong>Investigation steps:</strong></p>
+            <ol>
+              <li>Verify gossip peer count is healthy (typically 50+ active peers).</li>
+              <li>Monitor CPU during voting — should stay below 70 % sustained.</li>
+              <li>Check whether your VPS provider has bandwidth caps active.</li>
+              <li>Consider geographic relocation closer to cluster center.</li>
+              <li>Review Tachyon config for tuning opportunities.</li>
+            </ol>
+          </div>
 
-        <div class="tier tier-drift">
-          <h4>🔴 |drift| ≥ 5 s — Clock drift (Tier 2)</h4>
-          <p>
-            <strong>This IS a clock issue.</strong> Your system time is
-            wrong. Operator action is required.
-          </p>
-          <p><strong>Diagnostic commands:</strong></p>
-          <pre><code># Check current chrony status
+          <div class="tier tier-drift">
+            <h4>🔴 |drift| ≥ 5 s — Clock drift (Tier 2)</h4>
+            <p>
+              <strong>This IS a clock issue.</strong> Your system time is
+              wrong. Operator action is required.
+            </p>
+            <p><strong>Diagnostic commands:</strong></p>
+            <pre><code># Check current chrony status
 chronyc tracking
 # Should show: stratum 1-3, last offset &lt; 50 ms
 
@@ -496,96 +771,357 @@ timedatectl status
 # Check for systemd-timesyncd conflict
 systemctl status systemd-timesyncd
 # If active, this conflicts with chrony — disable it</code></pre>
-          <p><strong>Fix steps:</strong></p>
-          <ol>
-            <li>If <code>systemd-timesyncd</code> is active, disable it: <code>sudo systemctl disable --now systemd-timesyncd</code></li>
-            <li>
-              Configure chrony with multiple stratum-1 sources. Edit
-              <code>/etc/chrony/chrony.conf</code>:
-              <pre><code>server ptbtime1.ptb.de iburst
+            <p><strong>Fix steps:</strong></p>
+            <ol>
+              <li>If <code>systemd-timesyncd</code> is active, disable it: <code>sudo systemctl disable --now systemd-timesyncd</code></li>
+              <li>
+                Configure chrony with multiple stratum-1 sources. Edit
+                <code>/etc/chrony/chrony.conf</code>:
+                <pre><code>server ptbtime1.ptb.de iburst
 server tempus1.gum.gov.pl iburst
 server time.nist.gov iburst
 pool pool.ntp.org iburst maxsources 4</code></pre>
-            </li>
-            <li>Restart chrony: <code>sudo systemctl restart chrony</code></li>
-            <li>Verify firewall allows outbound UDP 123: <code>sudo ufw allow out 123/udp</code></li>
-            <li>Wait 1–2 hours for chrony to converge to atomic-level accuracy.</li>
-            <li>
-              Re-run <code>chronyc tracking</code> — last offset should
-              drop to &lt; 50 ms within an hour.
-            </li>
-          </ol>
+              </li>
+              <li>Restart chrony: <code>sudo systemctl restart chrony</code></li>
+              <li>Verify firewall allows outbound UDP 123: <code>sudo ufw allow out 123/udp</code></li>
+              <li>Wait 1–2 hours for chrony to converge to atomic-level accuracy.</li>
+              <li>
+                Re-run <code>chronyc tracking</code> — last offset should
+                drop to &lt; 50 ms within an hour.
+              </li>
+            </ol>
+          </div>
         </div>
+      </div>
+
+      <div class="diagnostic-step">
+        <h3><span class="step-number">3</span> Verify the fix</h3>
+        <p>
+          After making changes, watch your validator on this dashboard for
+          30+ minutes. The drift should drop into the normal range and
+          the severity badge should change:
+        </p>
+        <p class="severity-flow">🔴 Layer 2 drift &rarr; ⚠️ Slow pipeline &rarr; ✅ Normal pipeline</p>
+        <p>
+          If drift persists after Step 2 fixes for Tier 2 (clock issue),
+          your problem is likely Tier 1 (infrastructure) misclassified due
+          to extreme network delay. Investigate per Tier 1 steps above.
+        </p>
+        <p>
+          If drift persists after Step 2 fixes for Tier 1 (infrastructure),
+          and you have ruled out chrony, contact the X1 community on
+          Telegram with your validator pubkey and the timestamps where
+          you see elevated drift. Foundation may have additional context.
+        </p>
       </div>
     </div>
 
-    <div class="diagnostic-step">
-      <h3><span class="step-number">3</span> Verify the fix</h3>
-      <p>
-        After making changes, watch your validator on this dashboard for
-        30+ minutes. The drift should drop into the normal range and
-        the severity badge should change:
+    <div lang="pl">
+      <h2>Diagnostyka twojego walidatora</h2>
+      <p class="lead">
+        Jeśli twój walidator pokazuje podwyższony dryf na tym
+        dashboardzie, przejdź przez te kroki, żeby zidentyfikować
+        przyczynę. Dashboard rozróżnia problemy pipeline (sieć/infra,
+        Layer 1) od problemów zegara (NTP/chrony, Layer 2) — pod koniec
+        tego przewodnika będziesz wiedzieć dokładnie co naprawić.
       </p>
-      <p class="severity-flow">🔴 Layer 2 drift &rarr; ⚠️ Slow pipeline &rarr; ✅ Normal pipeline</p>
-      <p>
-        If drift persists after Step 2 fixes for Tier 2 (clock issue),
-        your problem is likely Tier 1 (infrastructure) misclassified due
-        to extreme network delay. Investigate per Tier 1 steps above.
-      </p>
-      <p>
-        If drift persists after Step 2 fixes for Tier 1 (infrastructure),
-        and you have ruled out chrony, contact the X1 community on
-        Telegram with your validator pubkey and the timestamps where
-        you see elevated drift. Foundation may have additional context.
-      </p>
+
+      <div class="diagnostic-step">
+        <h3><span class="step-number">1</span> Porównaj z innymi walidatorami</h3>
+        <p>
+          Spójrz na wykres <strong>X1 Labs foundation pipeline trend</strong>
+          oraz wykres <strong>Vote pipeline latency over time</strong>.
+          Czy twoje przesunięcie jest podwyższone, podczas gdy klaster
+          fundacji i walidatory z top-100 stake też są podwyższone?
+        </p>
+        <div class="diagnostic-cases">
+          <div class="case case-network-wide">
+            <h4>Przypadek A — Podwyższenie sieciowo</h4>
+            <p>
+              <strong>Diagnoza:</strong> Zdarzenie pipeline w skali
+              chain. Zmiana operacyjna X1 Labs, stres sieci, leader
+              skips, lub load test.
+            </p>
+            <p>
+              <strong>Akcja:</strong> Czekaj. Twój walidator jest OK;
+              protokół przeżywa turbulencje. Baseline zazwyczaj wraca w
+              ciągu godzin. Obserwuj wykres fundacji jako potwierdzenie,
+              że klaster odzyskuje wspólnie.
+            </p>
+          </div>
+          <div class="case case-isolated">
+            <h4>Przypadek B — Tylko twój walidator podwyższony</h4>
+            <p>
+              <strong>Diagnoza:</strong> Twój konkretny node ma problem.
+            </p>
+            <p>
+              <strong>Akcja:</strong> Przejdź do Kroku 2, żeby ustalić
+              czy to pipeline czy zegar.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="diagnostic-step">
+        <h3><span class="step-number">2</span> Sprawdź skalę</h3>
+        <p>
+          Spójrz na dryf <em>swojego</em> walidatora w sekcji
+          <strong>Anomalie i odchylenia</strong> na dashboardzie. Pasmo
+          skali mówi ci który subsystem badać.
+        </p>
+
+        <div class="diagnostic-tiers">
+          <div class="tier tier-ok">
+            <h4>✅ |dryf| &lt; 500 ms — Pipeline normalny</h4>
+            <p>Akcja nie jest potrzebna. Twój walidator działa poprawnie. Pozostałe sekcje tego przewodnika nie dotyczą.</p>
+          </div>
+
+          <div class="tier tier-slow">
+            <h4>⚠️ 500 ms ≤ |dryf| &lt; 5 s — Anomalia pipeline (Tier 1)</h4>
+            <p>
+              <strong>To NIE jest problem zegara.</strong> Twój
+              chrony/NTP jest OK; problem jest gdzieś w twoim vote
+              pipeline:
+            </p>
+            <ul>
+              <li>Wolne łącze sieciowe lub utrata pakietów</li>
+              <li>Saturacja CPU podczas głosowania</li>
+              <li>Dystans geograficzny od aktualnej rotacji leaderów</li>
+              <li>Nieoptymalna konfiguracja Tachyona</li>
+              <li>Niewystarczająca liczba peerów gossip</li>
+            </ul>
+            <p><strong>Komendy diagnostyczne:</strong></p>
+            <pre><code># Check leader proximity
+solana-validator leader-schedule --output json | head
+
+# Network round-trip to gossip peers
+ping -c 10 &lt;known-leader-ip&gt;
+
+# CPU / memory load
+top -bn1 | head -5
+iostat -x 1 5
+
+# Network connections (Solana gossip / TPU / TVU)
+ss -tuln | grep -E '(8000|8001|8003)'</code></pre>
+            <p><strong>Kroki diagnostyczne:</strong></p>
+            <ol>
+              <li>Zweryfikuj że liczba peerów gossip jest zdrowa (zazwyczaj 50+ aktywnych peerów).</li>
+              <li>Monitoruj CPU podczas głosowania — powinno utrzymywać się poniżej 70 % stale.</li>
+              <li>Sprawdź czy twój provider VPS ma aktywne limity bandwidth.</li>
+              <li>Rozważ relokację geograficzną bliżej centrum klastra.</li>
+              <li>Przejrzyj konfigurację Tachyona pod kątem możliwości tuningu.</li>
+            </ol>
+          </div>
+
+          <div class="tier tier-drift">
+            <h4>🔴 |dryf| ≥ 5 s — Dryf zegara (Tier 2)</h4>
+            <p>
+              <strong>TO JEST problem zegara.</strong> Twój czas
+              systemowy jest błędny. Wymagana akcja operatora.
+            </p>
+            <p><strong>Komendy diagnostyczne:</strong></p>
+            <pre><code># Check current chrony status
+chronyc tracking
+# Should show: stratum 1-3, last offset &lt; 50 ms
+
+# List time sources
+chronyc sources -v
+# Should show 3+ sources in "combined" or "selected" state
+
+# System NTP status
+timedatectl status
+# Should show: NTP service: active, NTP synchronized: yes
+
+# Check for systemd-timesyncd conflict
+systemctl status systemd-timesyncd
+# If active, this conflicts with chrony — disable it</code></pre>
+            <p><strong>Kroki naprawy:</strong></p>
+            <ol>
+              <li>Jeśli <code>systemd-timesyncd</code> jest aktywne, wyłącz: <code>sudo systemctl disable --now systemd-timesyncd</code></li>
+              <li>
+                Skonfiguruj chrony z wieloma źródłami stratum-1. Edytuj
+                <code>/etc/chrony/chrony.conf</code>:
+                <pre><code>server ptbtime1.ptb.de iburst
+server tempus1.gum.gov.pl iburst
+server time.nist.gov iburst
+pool pool.ntp.org iburst maxsources 4</code></pre>
+              </li>
+              <li>Zrestartuj chrony: <code>sudo systemctl restart chrony</code></li>
+              <li>Zweryfikuj że firewall pozwala na ruch wychodzący UDP 123: <code>sudo ufw allow out 123/udp</code></li>
+              <li>Czekaj 1–2 godziny aż chrony osiągnie zbieżność do dokładności atomowej.</li>
+              <li>
+                Uruchom ponownie <code>chronyc tracking</code> — last
+                offset powinien spaść do &lt; 50 ms w ciągu godziny.
+              </li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      <div class="diagnostic-step">
+        <h3><span class="step-number">3</span> Zweryfikuj naprawę</h3>
+        <p>
+          Po wprowadzeniu zmian, obserwuj swój walidator na tym
+          dashboardzie przez 30+ minut. Dryf powinien spaść do zakresu
+          normalnego, a badge severity powinien się zmienić:
+        </p>
+        <p class="severity-flow">🔴 Layer 2 dryf &rarr; ⚠️ Pipeline wolny &rarr; ✅ Pipeline normalny</p>
+        <p>
+          Jeśli dryf się utrzymuje po naprawach z Kroku 2 dla Tier 2
+          (problem zegara), twój problem to prawdopodobnie Tier 1
+          (infrastruktura) źle sklasyfikowane przez ekstremalne
+          opóźnienie sieci. Diagnozuj zgodnie z krokami Tier 1 powyżej.
+        </p>
+        <p>
+          Jeśli dryf się utrzymuje po naprawach z Kroku 2 dla Tier 1
+          (infrastruktura) i wykluczyłeś chrony, skontaktuj się ze
+          społecznością X1 na Telegramie z pubkey twojego walidatora i
+          timestampami gdzie widzisz podwyższony dryf. Fundacja może
+          mieć dodatkowy kontekst.
+        </p>
+      </div>
     </div>
   </section>
 
-  <h2>Limitations &amp; caveats</h2>
-  <ul>
-    <li>
-      We measure what&rsquo;s written in the chain, not validator system
-      clocks directly. Clock-drift inferred from drift &gt; 5 s assumes
-      pipeline contribution is bounded.
-    </li>
-    <li>
-      Sentinel measurement adds ~1-5 ms of network latency to RPC calls;
-      this is well below our 500 ms classification threshold.
-    </li>
-    <li>
-      Stake-weighted average is dominated by foundation (~72% of total
-      stake). Median is more representative of &ldquo;typical&rdquo;
-      validator behavior.
-    </li>
-    <li>
-      We cannot fully distinguish &ldquo;validator clock correct,
-      pipeline slow&rdquo; from &ldquo;pipeline normal, clock off by the
-      same amount&rdquo; — these would look identical from outside. We
-      rely on the foundation baseline + multi-validator comparison to
-      identify the most likely cause.
-    </li>
-  </ul>
+  <div lang="en">
+    <h2>Limitations &amp; caveats</h2>
+    <ul>
+      <li>
+        We measure what&rsquo;s written in the chain, not validator system
+        clocks directly. Clock-drift inferred from drift &gt; 5 s assumes
+        pipeline contribution is bounded.
+      </li>
+      <li>
+        Sentinel measurement adds ~1-5 ms of network latency to RPC calls;
+        this is well below our 500 ms classification threshold.
+      </li>
+      <li>
+        Stake-weighted average is dominated by foundation (~72% of total
+        stake). Median is more representative of &ldquo;typical&rdquo;
+        validator behavior.
+      </li>
+      <li>
+        We cannot fully distinguish &ldquo;validator clock correct,
+        pipeline slow&rdquo; from &ldquo;pipeline normal, clock off by the
+        same amount&rdquo; — these would look identical from outside. We
+        rely on the foundation baseline + multi-validator comparison to
+        identify the most likely cause.
+      </li>
+    </ul>
+  </div>
+  <div lang="pl">
+    <h2>Ograniczenia i zastrzeżenia</h2>
+    <ul>
+      <li>
+        Mierzymy co jest zapisane w chain, a nie zegary systemowe
+        walidatorów bezpośrednio. Dryf zegara wnioskowany z dryfu &gt; 5 s
+        zakłada, że wkład pipeline jest ograniczony.
+      </li>
+      <li>
+        Pomiar Sentinela dodaje ~1-5 ms opóźnienia sieciowego do
+        wywołań RPC; to jest mocno poniżej naszego progu klasyfikacji
+        500 ms.
+      </li>
+      <li>
+        Średnia ważona stakiem jest zdominowana przez fundację (~72 %
+        całkowitego stake’u). Mediana jest bardziej reprezentatywna dla
+        „typowego" zachowania walidatora.
+      </li>
+      <li>
+        Nie możemy w pełni rozróżnić „zegar walidatora poprawny,
+        pipeline wolny" od „pipeline normalny, zegar przesunięty o tę
+        samą wartość" — te wyglądałyby identycznie z zewnątrz. Polegamy
+        na baseline fundacji + porównaniu wielu walidatorów, żeby
+        zidentyfikować najprawdopodobniejszą przyczynę.
+      </li>
+    </ul>
+  </div>
 
-  <h2>References</h2>
-  <ul>
-    <li>Theo (X1 Labs) on pipeline vs drift — personal communication, X1 Labs Telegram</li>
-    <li>Strontium oracle (Layer 2 protocol-level fix) — X1 Labs project, separate repository</li>
-    <li>Solana vote consensus mechanics: <a href="https://docs.solana.com/consensus" target="_blank" rel="noreferrer noopener">https://docs.solana.com/consensus</a></li>
-    <li>chrony documentation: <a href="https://chrony-project.org/" target="_blank" rel="noreferrer noopener">https://chrony-project.org/</a></li>
-    <li>This dashboard source: <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener">github.com/PioWin-clo/X1-ClockDrift</a></li>
-  </ul>
+  <div lang="en">
+    <h2>References</h2>
+    <ul>
+      <li>Theo (X1 Labs) on pipeline vs drift — personal communication, X1 Labs Telegram</li>
+      <li>Strontium oracle (Layer 2 protocol-level fix) — X1 Labs project, separate repository</li>
+      <li>Solana vote consensus mechanics: <a href="https://docs.solana.com/consensus" target="_blank" rel="noreferrer noopener">https://docs.solana.com/consensus</a></li>
+      <li>chrony documentation: <a href="https://chrony-project.org/" target="_blank" rel="noreferrer noopener">https://chrony-project.org/</a></li>
+      <li>This dashboard source: <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener">github.com/PioWin-clo/X1-ClockDrift</a></li>
+    </ul>
+  </div>
+  <div lang="pl">
+    <h2>Referencje</h2>
+    <ul>
+      <li>Theo (X1 Labs) o pipeline vs dryf — osobista korespondencja, X1 Labs Telegram</li>
+      <li>Strontium oracle (korekcja Layer 2 na poziomie protokołu) — projekt X1 Labs, osobne repozytorium</li>
+      <li>Mechanika konsensusu vote w Solanie: <a href="https://docs.solana.com/consensus" target="_blank" rel="noreferrer noopener">https://docs.solana.com/consensus</a></li>
+      <li>Dokumentacja chrony: <a href="https://chrony-project.org/" target="_blank" rel="noreferrer noopener">https://chrony-project.org/</a></li>
+      <li>Źródło tego dashboardu: <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener">github.com/PioWin-clo/X1-ClockDrift</a></li>
+    </ul>
+  </div>
 
-  <h2>Version history</h2>
-  <ul>
-    <li><strong>v1.0.0</strong> — Layer 1/Layer 2 framework refactor + methodology page (this version)</li>
-    <li>v0.7.0 — Network drift chart window selector + outlier handling</li>
-    <li>v0.6.0 — Removed stake filters, added optional client-side stake lens</li>
-    <li>v0.5.0/v0.5.1 — Foundation drift trend, severity classification, Sentinel chart axis fix</li>
-    <li>v0.4.0 — Narrative pivot to chain time hero, foundation whitelist</li>
-    <li>v0.3.x — Initial deployment, raw drift measurement</li>
-  </ul>
+  <div lang="en">
+    <h2>Version history</h2>
+    <ul>
+      <li><strong>v1.2.0</strong> — Adaptive bucket aggregation for chart readability + Polish methodology + README sync</li>
+      <li>v1.1.0 — Diagnostic snapshot widget + operator diagnostic flowchart</li>
+      <li>v1.0.0 — Layer 1/Layer 2 framework refactor + methodology page</li>
+      <li>v0.7.0 — Network drift chart window selector + outlier handling</li>
+      <li>v0.6.0 — Removed stake filters, added optional client-side stake lens</li>
+      <li>v0.5.0 / v0.5.1 — Foundation drift trend, severity classification, Sentinel chart axis fix</li>
+      <li>v0.4.0 — Narrative pivot to chain time hero, foundation whitelist</li>
+      <li>v0.3.x — Initial deployment, raw drift measurement</li>
+    </ul>
+  </div>
+  <div lang="pl">
+    <h2>Historia wersji</h2>
+    <ul>
+      <li><strong>v1.2.0</strong> — Adaptywna agregacja kubełków dla czytelności wykresu + polska metodologia + synchronizacja README</li>
+      <li>v1.1.0 — Widget diagnostycznego snapshotu + przewodnik diagnostyki dla operatora</li>
+      <li>v1.0.0 — Refaktor frameworka Layer 1 / Layer 2 + strona metodologii</li>
+      <li>v0.7.0 — Selektor okna na wykresie network drift + obsługa outlierów</li>
+      <li>v0.6.0 — Usunięcie filtrów stake, dodanie opcjonalnego filtra po stronie klienta</li>
+      <li>v0.5.0 / v0.5.1 — Trend dryfu fundacji, klasyfikacja severity, fix osi wykresu Sentinela</li>
+      <li>v0.4.0 — Pivot narracyjny do hero chain time, whitelist fundacji</li>
+      <li>v0.3.x — Pierwsze wdrożenie, surowy pomiar dryfu</li>
+    </ul>
+  </div>
 
-  <a href="../index.html" class="nav-back">← Back to dashboard</a>
+  <a href="../index.html" class="nav-back" lang="en">← Back to dashboard</a>
+  <a href="../index.html" class="nav-back" lang="pl">← Powrót do dashboardu</a>
 </div>
+
+<script>
+  // v1.2.0 — bilingual page. Shares the localStorage `lang` key with
+  // the main dashboard so the two pages don't drift out of sync: pick
+  // a language once, it sticks across both. Falls back to browser
+  // preference (Accept-Language top entry) if no choice persisted yet.
+  (function () {
+    'use strict';
+    var btnEn = document.getElementById('doc-lang-en');
+    var btnPl = document.getElementById('doc-lang-pl');
+
+    function setLang(lang) {
+      if (lang !== 'pl') lang = 'en';
+      document.documentElement.lang = lang;
+      btnEn.classList.toggle('active', lang === 'en');
+      btnPl.classList.toggle('active', lang === 'pl');
+      try { localStorage.setItem('lang', lang); } catch (_) { /* private mode */ }
+    }
+
+    var initial = 'en';
+    try {
+      var saved = localStorage.getItem('lang');
+      if (saved === 'pl' || saved === 'en') {
+        initial = saved;
+      } else {
+        var browserLang = (navigator.language || 'en').toLowerCase();
+        if (browserLang.indexOf('pl') === 0) initial = 'pl';
+      }
+    } catch (_) { /* private mode */ }
+    setLang(initial);
+
+    btnEn.addEventListener('click', function () { setLang('en'); });
+    btnPl.addEventListener('click', function () { setLang('pl'); });
+  })();
+</script>
 </body>
 </html>

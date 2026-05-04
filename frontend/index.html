@@ -164,7 +164,7 @@
   <!-- ===== Vote pipeline latency over time (v1.0.0 framing) ===== -->
   <section class="chart-block">
     <div class="chart-title" data-i18n="chart_history_title">Vote pipeline latency over time (5-minute buckets)</div>
-    <p class="section-help" data-i18n="chart_history_help">Aggregate vote-to-block latency across all voting validators. Stable ~-800 ms = healthy Tachyon protocol. Sudden swings = network stress, deployments, or load events.</p>
+    <p class="section-help" id="chart-history-subtitle" data-i18n="chart_history_subtitle_template">Aggregate vote-to-block latency · {bucketLabel} buckets · stable ~-800 ms = healthy Tachyon protocol; sudden swings = stress, deployments, load events.</p>
     <div class="chart-controls">
       <div class="window-selector" role="group" aria-label="Window">
         <button type="button" class="window-btn" data-window-days="2" data-i18n="network_window_2d">2d</button>
