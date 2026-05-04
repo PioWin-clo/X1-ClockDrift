@@ -4,42 +4,47 @@ const PAGE_SIZE = 50;
 
 const I18N = {
   en: {
-    tagline: 'Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.',
+    tagline: 'Time integrity monitor for the X1 blockchain — Layer 1 (vote pipeline) + Layer 2 (clock drift).',
     updated: 'updated',
     hide_foundation: 'Hide X1 Labs',
     stake_filter_label: 'Min stake (XNT, optional)',
     stake_filter_hint: 'Client-side lens. Server keeps all stake levels.',
 
-    hero1_title: 'X1 network time right now',
-    hero1_chain_time: 'X1 chain consensus',
-    hero1_real_utc: 'Real UTC',
-    hero1_drift_label: (drift) => {
-      const a = Math.abs(drift);
-      const dir = drift >= 0 ? 'ahead of' : 'behind';
-      const sign = drift >= 0 ? '+' : '−';
-      const v = a >= 1000 ? `${(a / 1000).toFixed(2)}s` : `${a.toFixed(0)} ms`;
-      return `X1 chain is ${sign}${v} ${dir} real UTC`;
+    // v1.0.0 Hero #1 — vote pipeline latency
+    hero1_title: 'X1 vote pipeline latency vs UTC',
+    hero1_subtitle: 'Time from vote creation to on-chain visibility',
+    hero1_explanation: 'Solana/Tachyon vote pipeline takes ~400-850 ms inherently (signing + gossip + block inclusion). Values in this range are normal — Layer 1 baseline, not clock drift. See methodology.',
+    hero1_lag_label: (lagMs) => {
+      const a = Math.abs(lagMs);
+      const sign = lagMs >= 0 ? '+' : '−';
+      const v = a >= 1000 ? `${(a / 1000).toFixed(2)} s` : `${a.toFixed(0)} ms`;
+      return `${sign}${v}`;
     },
     hero1_trend_label: (mean, std, isStable) => {
-      const trend = isStable ? 'stable' : 'drifting';
+      const trend = isStable ? 'stable' : 'fluctuating';
       return `24h trend: ${trend}, mean ${mean.toFixed(0)} ms ± ${std.toFixed(0)} ms`;
     },
 
-    hero2_title: 'Validator clock health',
-    health_critical: 'Critical',
-    health_critical_sub: '>5s',
-    health_high: 'High',
-    health_high_sub: '1-5s',
-    health_healthy: 'Healthy',
-    health_healthy_sub: '<1s',
-    health_foundation: 'X1 Labs',
-    health_foundation_sub: 'separate',
+    // v1.0.0 Hero #2 — pipeline health (drift bands rebucketed)
+    hero2_title: 'Validator pipeline health',
+    hero2_subtitle: 'Distribution by deviation from foundation baseline',
+    health_normal_label: 'Normal pipeline',
+    health_normal_desc: '|deviation| < 500 ms',
+    health_slow_label: 'Slow pipeline',
+    health_slow_desc: '500 ms – 5 s — investigate network/CPU',
+    health_drift_label: 'Clock drift',
+    health_drift_desc: '|drift| ≥ 5 s — Layer 2, real clock issue',
+    health_foundation_label: 'X1 Labs',
+    health_foundation_desc: 'baseline reference',
 
-    chart_history_title: 'Network drift over time (5-minute buckets)',
-    chart_history_median: 'X1 median drift',
-    chart_history_stake: 'X1 stake-weighted',
+    // v1.0.0 Network chart — pipeline-latency framing
+    chart_history_title: 'Vote pipeline latency over time (5-minute buckets)',
+    chart_history_help: 'Aggregate vote-to-block latency across all voting validators. Stable ~-800 ms = healthy Tachyon protocol. Sudden swings = network stress, deployments, or load events.',
+    chart_history_median: 'X1 median lag',
+    chart_history_stake: 'X1 stake-weighted lag',
     chart_history_sentinel: 'Sentinel offset (ms)',
-    chart_axis_drift_ms: 'drift (ms)',
+    chart_axis_drift_ms: 'pipeline lag (ms)',
+    chart_axis_lag_ms: 'pipeline lag (ms)',
     network_window_2d: '2d',
     network_window_4d: '4d',
     network_window_6d: '6d',
@@ -47,39 +52,68 @@ const I18N = {
     network_show_outliers: 'Show outliers',
     network_outlier_alert_title: '⚠️ Chain time anomalies detected:',
     chart_y_clamped_note: 'Y-axis: ±5000 ms · ▲ marker = value exceeds range',
-    chart_histogram_title: 'Validator drift distribution (all tracked)',
-    foundation_trend_title: 'X1 Labs foundation drift trend (14 days)',
-    foundation_trend_help: 'Tracks the 12-node X1 Labs foundation cluster drift over time. Sudden shifts (>100 ms in one bucket) indicate X1 Labs changed Tachyon configuration, NTP source, or deployed an update.',
-    foundation_current_drift: 'Current avg drift',
+    chart_histogram_title: 'Validator pipeline lag distribution (all tracked)',
+
+    // v1.0.0 Foundation trend — pipeline framing
+    foundation_trend_title: 'X1 Labs foundation pipeline trend (14 days)',
+    foundation_trend_help: 'Tracks pipeline latency for the 12-node X1 Labs foundation cluster. Shifts >100 ms in one bucket indicate X1 Labs changed something operationally — Tachyon config, NTP source, deployment, or load test. NOT clock drift (foundation clocks are tightly synchronized — identical signature across nodes proves this).',
+    foundation_current_drift: 'Current avg lag',
+    foundation_current_lag: 'Current avg lag',
     foundation_drift_change_7d: 'Change vs 7d ago',
+    foundation_lag_change_7d: 'Change vs 7d ago',
     foundation_active_nodes: 'Active foundation nodes',
-    foundation_alert_label: '⚠️ Recent change detected',
-    foundation_trend_avg: 'avg drift',
+    foundation_alert_label: '⚠️ Operational change detected',
+    foundation_trend_avg: 'avg lag',
     foundation_trend_min: 'min',
     foundation_trend_max: 'max',
-    worst_top_subtitle: 'Validators with drift ≥500 ms · ≥20 samples · any stake.',
-    best_top_subtitle: '≥100 samples · |drift|<5 s · foundation excluded · any stake.',
-    severity_critical: 'critical',
-    severity_high: 'high',
-    severity_medium: 'medium',
 
-    worst_table_title: 'Top worst validators',
-    worst_table_help: 'Sorted by absolute drift (worst first). Foundation nodes flagged but appear in their natural position.',
+    // v1.0.0 Best — pipeline efficiency
+    best_top_title: 'Top pipeline efficient validators (top 10)',
+    best_top_subtitle: '≥100 samples · |lag|<5 s · foundation excluded · sorted by ABS(lag) ascending',
+    best_top_help: 'Lowest pipeline latency means fastest vote→block round-trip. NOT necessarily the best clock — pipeline depends on network position, leader proximity, and Tachyon configuration. Foundation excluded since its baseline is the protocol baseline.',
+    best_synced_title: 'Top pipeline efficient validators (top 10)',
+    best_synced_help_v04: 'Lowest pipeline latency means fastest vote→block round-trip. NOT necessarily the best clock — pipeline depends on network position, leader proximity, and Tachyon configuration. Foundation excluded since its baseline is the protocol baseline.',
+
+    // v1.0.0 Anomalies — split into two tiers
+    worst_section_title: 'Anomalies & deviations',
+    worst_tier1_title: 'Pipeline anomalies',
+    worst_tier1_subtitle: '500 ms ≤ |lag| < 5 s · ≥20 samples · slow but not clock drift',
+    worst_tier1_help: 'Validators with elevated pipeline latency. Causes: slow network, CPU saturation, geographic distance from leaders, suboptimal Tachyon config. Not a chain-time threat — but operator should investigate infra.',
+    worst_tier2_title: 'Clock drift (Layer 2)',
+    worst_tier2_subtitle: '|drift| ≥ 5 s · ≥20 samples · genuine clock misconfiguration',
+    worst_tier2_help: 'Validators whose Clock::unix_timestamp deviates from real UTC by 5+ seconds. This IS clock drift — operator needs to fix chrony/NTP. Strontium oracle corrects this at protocol level for chain consumers.',
+    worst_table_title: 'Pipeline anomalies',
+    worst_table_help: 'Sorted by absolute lag (worst first). Foundation nodes flagged but appear in their natural position.',
     ranking_search_placeholder: 'search by pubkey…',
     filter_all: 'All',
     filter_critical: 'Critical only',
     filter_high: 'High and worse',
     col_rank: '#',
     col_pubkey: 'pubkey',
-    col_drift: 'drift (ms)',
+    col_drift: 'lag (ms)',
     col_jitter: 'jitter (ms)',
     col_n: 'n',
     col_stake: 'stake (XNT)',
     col_severity: 'tag',
     col_label: 'label',
 
-    best_synced_title: 'Best synchronized validators (top 10)',
-    best_synced_help_v04: 'Validators with the smallest absolute drift. Min 100 samples, foundation excluded, |drift|<5 s. Stake is informational only — operators of any size can rank here.',
+    // v1.0.0 Severity badges (Layer 1/2 framework)
+    severity_layer2: 'Layer 2 drift',
+    severity_pipeline_slow: 'slow pipeline',
+    severity_normal: 'normal',
+    // legacy badge labels — kept for any place still binding to them
+    severity_critical: 'critical',
+    severity_high: 'high',
+    severity_medium: 'medium',
+
+    // v1.0.0 Layer 1/2 explainer block at page bottom
+    layer_explainer_title: 'How to read this dashboard',
+    layer1_title: 'Layer 1 — Pipeline latency',
+    layer2_title: 'Layer 2 — Clock drift',
+    layer1_explanation: 'Vote pipeline latency: ~400-850 ms inherent in Tachyon protocol. Sum of signing + gossip + block inclusion times. Identical across well-synchronized validators.',
+    layer2_explanation: 'Validator system time vs real UTC. |drift| > 5 s indicates NTP/chrony misconfiguration. This is what Strontium oracle corrects.',
+    methodology_link: 'methodology',
+    methodology_cta: 'Full details:',
 
     foundation_table_title: '🏛️ X1 Labs Foundation',
     foundation_table_help: 'Official X1 Labs infrastructure. Shown separately because their drift is operational baseline, not validator misconfiguration.',
@@ -136,41 +170,47 @@ const I18N = {
   },
 
   pl: {
-    tagline: 'Bieżący dryf <code>Clock::unix_timestamp</code> na blockchainie X1.',
+    tagline: 'Monitor integralności czasu blockchaina X1 — Layer 1 (vote pipeline) + Layer 2 (dryf zegara).',
     updated: 'aktualizacja',
     hide_foundation: 'Ukryj X1 Labs',
     stake_filter_label: 'Min stake (XNT, opcjonalnie)',
     stake_filter_hint: 'Filtr po stronie klienta. Serwer zachowuje wszystkie poziomy stake.',
 
-    hero1_title: 'Czas sieci X1 teraz',
-    hero1_chain_time: 'Konsensus chain X1',
-    hero1_real_utc: 'Realny UTC',
-    hero1_drift_label: (drift) => {
-      const a = Math.abs(drift);
-      const dir = drift >= 0 ? 'przed' : 'za';
-      const sign = drift >= 0 ? '+' : '−';
-      const v = a >= 1000 ? `${(a / 1000).toFixed(2)}s` : `${a.toFixed(0)} ms`;
-      return `Chain X1 jest ${sign}${v} ${dir} realnym UTC`;
+    // v1.0.0 Hero #1 — opóźnienie pipeline głosowania
+    hero1_title: 'Opóźnienie pipeline głosowania X1 vs UTC',
+    hero1_subtitle: 'Czas od utworzenia vote do widoczności w bloku',
+    hero1_explanation: 'Pipeline głosowania Solana/Tachyon ma wbudowane opóźnienie ~400-850 ms (podpisywanie + gossip + włączenie do bloku). Wartości w tym zakresie są normalne — baseline Layer 1, nie dryf zegara. Patrz metodologia.',
+    hero1_lag_label: (lagMs) => {
+      const a = Math.abs(lagMs);
+      const sign = lagMs >= 0 ? '+' : '−';
+      const v = a >= 1000 ? `${(a / 1000).toFixed(2)} s` : `${a.toFixed(0)} ms`;
+      return `${sign}${v}`;
     },
     hero1_trend_label: (mean, std, isStable) => {
-      const trend = isStable ? 'stabilny' : 'dryfujący';
+      const trend = isStable ? 'stabilny' : 'fluktuujący';
       return `Trend 24h: ${trend}, średnia ${mean.toFixed(0)} ms ± ${std.toFixed(0)} ms`;
     },
 
-    hero2_title: 'Stan zegarów walidatorów',
-    health_critical: 'Krytyczne',
-    health_critical_sub: '>5s',
-    health_high: 'Wysokie',
-    health_high_sub: '1-5s',
-    health_healthy: 'Zdrowe',
-    health_healthy_sub: '<1s',
-    health_foundation: 'X1 Labs',
-    health_foundation_sub: 'osobno',
+    // v1.0.0 Hero #2 — stan pipeline (przebudowane progi dryfu)
+    hero2_title: 'Stan pipeline walidatorów',
+    hero2_subtitle: 'Rozkład odchyleń od baseline’u fundacji',
+    health_normal_label: 'Pipeline normalny',
+    health_normal_desc: '|odchylenie| < 500 ms',
+    health_slow_label: 'Pipeline wolny',
+    health_slow_desc: '500 ms – 5 s — sprawdź sieć/CPU',
+    health_drift_label: 'Dryf zegara',
+    health_drift_desc: '|dryf| ≥ 5 s — Layer 2, realny problem zegara',
+    health_foundation_label: 'X1 Labs',
+    health_foundation_desc: 'referencja',
 
-    chart_history_title: 'Dryf sieci w czasie (kubełki 5-minutowe)',
-    chart_history_median: 'Mediana X1',
-    chart_history_stake: 'X1 ważone stakiem',
+    // v1.0.0 Wykres sieci — narracja pipeline
+    chart_history_title: 'Opóźnienie pipeline w czasie (kubełki 5-minutowe)',
+    chart_history_help: 'Zagregowane opóźnienie vote-do-bloku dla wszystkich głosujących walidatorów. Stabilne ~-800 ms = zdrowy protokół Tachyon. Nagłe wahania = stres sieci, deploymenty, lub load testy.',
+    chart_history_median: 'Mediana opóźnienia X1',
+    chart_history_stake: 'Opóźnienie ważone stakiem',
     chart_history_sentinel: 'Odchylenie Sentinela (ms)',
+    chart_axis_drift_ms: 'opóźnienie pipeline (ms)',
+    chart_axis_lag_ms: 'opóźnienie pipeline (ms)',
     network_window_2d: '2d',
     network_window_4d: '4d',
     network_window_6d: '6d',
@@ -178,40 +218,68 @@ const I18N = {
     network_show_outliers: 'Pokaż outlierów',
     network_outlier_alert_title: '⚠️ Wykryto anomalie chain time:',
     chart_y_clamped_note: 'Oś Y: ±5000 ms · ▲ marker = wartość przekracza zakres',
-    chart_axis_drift_ms: 'dryf (ms)',
-    chart_histogram_title: 'Rozkład dryfu walidatorów (wszyscy śledzeni)',
-    foundation_trend_title: 'Trend dryfu fundacji X1 Labs (14 dni)',
-    foundation_trend_help: 'Śledzi dryf klastra 12 nodów fundacji w czasie. Nagłe skoki (>100 ms w jednym kubełku) oznaczają że X1 Labs zmieniło konfigurację Tachyona, źródło NTP, lub wdrożyło aktualizację.',
-    foundation_current_drift: 'Aktualny średni dryf',
+    chart_histogram_title: 'Rozkład opóźnienia pipeline walidatorów (wszyscy śledzeni)',
+
+    // v1.0.0 Trend fundacji — narracja pipeline
+    foundation_trend_title: 'Trend pipeline fundacji X1 Labs (14 dni)',
+    foundation_trend_help: 'Śledzi opóźnienie pipeline klastra 12 nodów fundacji X1 Labs. Skoki >100 ms w jednym kubełku oznaczają że X1 Labs zmieniło coś operacyjnie — konfigurację Tachyona, źródło NTP, deployment, albo load test. NIE dryf zegara (zegary fundacji są ściśle zsynchronizowane — identyczna sygnatura na wszystkich nodach to potwierdza).',
+    foundation_current_drift: 'Aktualne średnie opóźnienie',
+    foundation_current_lag: 'Aktualne średnie opóźnienie',
     foundation_drift_change_7d: 'Zmiana vs 7 dni temu',
+    foundation_lag_change_7d: 'Zmiana vs 7 dni temu',
     foundation_active_nodes: 'Aktywne nody fundacji',
-    foundation_alert_label: '⚠️ Wykryto niedawną zmianę',
-    foundation_trend_avg: 'średni dryf',
+    foundation_alert_label: '⚠️ Wykryto zmianę operacyjną',
+    foundation_trend_avg: 'średnie opóźnienie',
     foundation_trend_min: 'min',
     foundation_trend_max: 'max',
-    worst_top_subtitle: 'Walidatorzy z dryfem ≥500 ms · ≥20 próbek · dowolny stake.',
-    best_top_subtitle: '≥100 próbek · |dryf|<5 s · bez fundacji · dowolny stake.',
-    severity_critical: 'krytyczny',
-    severity_high: 'wysoki',
-    severity_medium: 'średni',
 
-    worst_table_title: 'Najgorsze walidatory',
-    worst_table_help: 'Sortowanie po bezwzględnej wartości dryfu (najgorsze najpierw). Walidatory fundacji oznaczone, ale widoczne w naturalnej kolejności.',
+    // v1.0.0 Best — efektywność pipeline
+    best_top_title: 'Najefektywniejszy pipeline (top 10)',
+    best_top_subtitle: '≥100 próbek · |opóźnienie|<5 s · bez fundacji · sortowane rosnąco po ABS(opóźnienie)',
+    best_top_help: 'Najniższe opóźnienie pipeline oznacza najszybszą rundę vote→blok. NIE oznacza „najlepszego zegara" — pipeline zależy od pozycji w sieci, bliskości do leaderów, i konfiguracji Tachyona. Fundacja wykluczona bo jej baseline to baseline protokołu.',
+    best_synced_title: 'Najefektywniejszy pipeline (top 10)',
+    best_synced_help_v04: 'Najniższe opóźnienie pipeline oznacza najszybszą rundę vote→blok. NIE oznacza „najlepszego zegara" — pipeline zależy od pozycji w sieci, bliskości do leaderów, i konfiguracji Tachyona. Fundacja wykluczona bo jej baseline to baseline protokołu.',
+
+    // v1.0.0 Anomalie — podział na dwa tier-y
+    worst_section_title: 'Anomalie i odchylenia',
+    worst_tier1_title: 'Anomalie pipeline',
+    worst_tier1_subtitle: '500 ms ≤ |opóźnienie| < 5 s · ≥20 próbek · wolny pipeline, nie dryf zegara',
+    worst_tier1_help: 'Walidatorzy z podwyższonym opóźnieniem pipeline. Przyczyny: wolna sieć, saturacja CPU, dystans geograficzny od leaderów, nieoptymalna konfiguracja Tachyona. Nie zagraża chain time — ale operator powinien sprawdzić infra.',
+    worst_tier2_title: 'Dryf zegara (Layer 2)',
+    worst_tier2_subtitle: '|dryf| ≥ 5 s · ≥20 próbek · realna błędna konfiguracja zegara',
+    worst_tier2_help: 'Walidatorzy których Clock::unix_timestamp odbiega od prawdziwego UTC o 5+ sekund. TO JEST dryf zegara — operator musi naprawić chrony/NTP. Strontium oracle koryguje to na poziomie protokołu dla konsumentów chain.',
+    worst_table_title: 'Anomalie pipeline',
+    worst_table_help: 'Sortowanie po bezwzględnej wartości opóźnienia (najgorsze najpierw). Walidatory fundacji oznaczone, ale widoczne w naturalnej kolejności.',
     ranking_search_placeholder: 'szukaj po pubkey…',
     filter_all: 'Wszystkie',
     filter_critical: 'Tylko krytyczne',
     filter_high: 'Wysokie i gorsze',
     col_rank: '#',
     col_pubkey: 'pubkey',
-    col_drift: 'dryf (ms)',
+    col_drift: 'opóźnienie (ms)',
     col_jitter: 'jitter (ms)',
     col_n: 'n',
     col_stake: 'stake (XNT)',
     col_severity: 'tag',
     col_label: 'label',
 
-    best_synced_title: 'Najlepiej zsynchronizowani walidatorzy (top 10)',
-    best_synced_help_v04: 'Walidatory z najmniejszym bezwzględnym dryfem. Min 100 próbek, fundacja wykluczona, |dryf|<5 s. Stake jest informacyjny — operatorzy o dowolnej wielkości mogą się znaleźć na liście.',
+    // v1.0.0 Severity badges
+    severity_layer2: 'Layer 2 dryf',
+    severity_pipeline_slow: 'wolny pipeline',
+    severity_normal: 'normalny',
+    // legacy
+    severity_critical: 'krytyczny',
+    severity_high: 'wysoki',
+    severity_medium: 'średni',
+
+    // v1.0.0 Layer 1/2 wyjaśnienie na dole strony
+    layer_explainer_title: 'Jak czytać ten dashboard',
+    layer1_title: 'Layer 1 — Opóźnienie pipeline',
+    layer2_title: 'Layer 2 — Dryf zegara',
+    layer1_explanation: 'Opóźnienie vote pipeline: ~400-850 ms wbudowane w protokół Tachyon. Suma czasów podpisywania + gossip + włączenia do bloku. Identyczne dla dobrze zsynchronizowanych walidatorów.',
+    layer2_explanation: 'Czas systemowy walidatora vs prawdziwy UTC. |dryf| > 5 s wskazuje na błędną konfigurację NTP/chrony. To jest co koryguje Strontium oracle.',
+    methodology_link: 'metodologia',
+    methodology_cta: 'Pełne szczegóły:',
 
     foundation_table_title: '🏛️ X1 Labs Foundation',
     foundation_table_help: 'Oficjalna infrastruktura X1 Labs. Pokazana osobno bo ich dryf jest baseline operacyjnym, nie błędem konfiguracji walidatora.',
@@ -285,6 +353,9 @@ const state = {
   meta: null,
   best: [],
   worst: [],                  // v0.5.0: server-side filtered worst ranking
+                              // (v1.0.0: mirrors pipelineAnomalies for legacy renderer)
+  pipelineAnomalies: [],      // v1.0.0 Tier 1: 500ms ≤ |lag| < 5s
+  clockDrift: [],             // v1.0.0 Tier 2: |drift| ≥ 5s — real Layer 2
   foundation: [],
   foundationTrend: [],        // v0.5.0: 14-day foundation drift trend
   chrony: null,
@@ -314,15 +385,21 @@ const VALID_WINDOW_DAYS = [2, 4, 6, 12];
 const el = {};
 function bindElements() {
   el.updatedTs = document.getElementById('updated-ts');
-  el.hero1ChainTime = document.getElementById('hero1-chain-time');
-  el.hero1RealUtc = document.getElementById('hero1-real-utc');
-  el.hero1Drift = document.getElementById('hero1-drift');
+  // v1.0.0: hero #1 simplified to a single pipeline-lag figure +
+  // explanation. The legacy chain-time/real-utc dual readout was
+  // removed because the hero was conflating "what time is X1's chain"
+  // with "what's the pipeline latency" — those are different things.
+  el.pipelineCurrentLag = document.getElementById('pipeline-current-lag');
   el.hero1Trend = document.getElementById('hero1-trend');
-  el.nCritical = document.getElementById('n-critical');
-  el.nHigh = document.getElementById('n-high');
-  el.nHealthy = document.getElementById('n-healthy');
-  el.nFoundation = document.getElementById('n-foundation');
+  // v1.0.0: hero #2 health bands. Drift-magnitude buckets, not legacy
+  // critical/high/healthy severity strings.
+  el.healthNormalCount = document.getElementById('health-normal-count');
+  el.healthSlowCount = document.getElementById('health-slow-count');
+  el.healthDriftCount = document.getElementById('health-drift-count');
+  el.healthFoundationCount = document.getElementById('health-foundation-count');
   el.worstBody = document.getElementById('worst-body');
+  el.clockDriftBody = document.getElementById('clock-drift-body');
+  el.clockDriftEmpty = document.getElementById('clock-drift-empty');
   el.bestSyncedBody = document.getElementById('best-synced-body');
   el.foundationBody = document.getElementById('foundation-body');
   el.sourcesBody = document.getElementById('sources-body');
@@ -443,24 +520,54 @@ function setLanguage(lang) {
 
 async function loadAll() {
   try {
-    const [summary, validators, history, meta, best, worst, foundation, foundationTrend, chrony] =
-      await Promise.all([
-        fetchJSON('data/summary.json'),
-        fetchJSON('data/validators.json'),
-        fetchJSON('data/history.json'),
-        fetchJSON('data/meta.json'),
-        fetchJSONOptional('data/best_validators.json'),
-        fetchJSONOptional('data/worst_validators.json'),
-        fetchJSONOptional('data/foundation.json'),
-        fetchJSONOptional('data/foundation_drift_trend.json'),
-        fetchJSONOptional('data/chrony.json'),
-      ]);
+    // v1.0.0: pipeline_anomalies.json (Tier 1) + clock_drift.json (Tier 2)
+    // are the canonical worst-tables. worst_validators.json is fetched as
+    // a fallback for the first cycle after a daemon upgrade where the
+    // new files aren't on the data branch yet — once they exist, Tier 1
+    // takes over and the fallback path becomes a no-op.
+    const [
+      summary, validators, history, meta,
+      best, pipelineAnomalies, clockDrift, worstLegacy,
+      foundation, foundationTrend, chrony,
+    ] = await Promise.all([
+      fetchJSON('data/summary.json'),
+      fetchJSON('data/validators.json'),
+      fetchJSON('data/history.json'),
+      fetchJSON('data/meta.json'),
+      fetchJSONOptional('data/best_validators.json'),
+      fetchJSONOptional('data/pipeline_anomalies.json'),
+      fetchJSONOptional('data/clock_drift.json'),
+      fetchJSONOptional('data/worst_validators.json'),
+      fetchJSONOptional('data/foundation.json'),
+      fetchJSONOptional('data/foundation_drift_trend.json'),
+      fetchJSONOptional('data/chrony.json'),
+    ]);
     state.summary = summary;
     state.validators = validators || [];
     state.history = history || [];
     state.meta = meta;
     state.best = best || [];
-    state.worst = worst || [];
+    // Prefer the v1.0.0 split exports; fall back to the legacy combined
+    // ranking only if the split files are missing (pre-upgrade snapshot).
+    if (pipelineAnomalies != null || clockDrift != null) {
+      state.pipelineAnomalies = pipelineAnomalies || [];
+      state.clockDrift = clockDrift || [];
+      // Mirror Tier 1 into state.worst so the legacy worst-table render
+      // path keeps working without a parallel rewrite.
+      state.worst = state.pipelineAnomalies;
+    } else {
+      const legacy = worstLegacy || [];
+      // Split the legacy combined ranking into the two tiers client-side
+      // so the new UI still renders correctly during the transition.
+      state.pipelineAnomalies = legacy.filter((v) => {
+        const a = Math.abs(v.mean_drift_ms || 0);
+        return a >= 500 && a < 5000;
+      });
+      state.clockDrift = legacy.filter(
+        (v) => Math.abs(v.mean_drift_ms || 0) >= 5000,
+      );
+      state.worst = state.pipelineAnomalies;
+    }
     state.foundation = foundation || [];
     state.foundationTrend = foundationTrend || [];
     state.chrony = chrony;
@@ -502,7 +609,8 @@ function renderAll() {
   renderHistoryChart();
   renderFoundationTrend();    // v0.5.0
   applyWorstFilter();
-  renderWorstTable();
+  renderWorstTable();        // v1.0.0 Tier 1: pipeline anomalies
+  renderClockDriftTable();   // v1.0.0 Tier 2: Layer 2 clock drift
   renderBestSynced();
   renderFoundation();
   renderHistogram();
@@ -518,53 +626,79 @@ function renderHeader() {
   }
 }
 
-let hero1TickHandle = null;
+// v1.0.0: hero #1 — single pipeline-lag figure with explanation. The
+// legacy chain-time / real-utc dual readout was misframing the signal
+// as "X1 chain consensus vs UTC" when it's actually pipeline latency.
 function renderHero1() {
-  // Hero #1 ticks live: wall clock + chain time (= wall clock + drift_ms_now).
-  // No separate setInterval — we already tick wall clock at 100ms.
-  tickHero1();
   if (!state.summary) return;
   const t = I18N[state.lang];
-  const drift = state.summary.drift_ms_now ?? 0;
-  el.hero1Drift.textContent = t.hero1_drift_label(drift);
-  el.hero1Drift.className = 'hero1-drift ' + heroDriftColorClass(Math.abs(drift));
-  const mean = state.summary.drift_24h_mean_ms ?? 0;
-  const std = state.summary.drift_24h_stddev_ms ?? 0;
-  const isStable = std < STABILITY_THRESHOLD_MS;
-  el.hero1Trend.textContent = t.hero1_trend_label(mean, std, isStable);
+  const lag = state.summary.drift_ms_now ?? 0;
+  if (el.pipelineCurrentLag) {
+    el.pipelineCurrentLag.textContent = t.hero1_lag_label(lag);
+    el.pipelineCurrentLag.className =
+      'mono ' + pipelineLagColorClass(Math.abs(lag));
+  }
+  if (el.hero1Trend) {
+    const mean = state.summary.drift_24h_mean_ms ?? 0;
+    const std = state.summary.drift_24h_stddev_ms ?? 0;
+    const isStable = std < STABILITY_THRESHOLD_MS;
+    el.hero1Trend.textContent = t.hero1_trend_label(mean, std, isStable);
+  }
 }
 
-function tickHero1() {
-  const now = new Date();
-  const driftMs = state.summary?.drift_ms_now ?? 0;
-  const chainNow = new Date(now.getTime() + driftMs);
-  el.hero1RealUtc.textContent = formatIsoMillis(now);
-  el.hero1ChainTime.textContent = formatIsoMillis(chainNow);
-}
-
-function heroDriftColorClass(absMs) {
-  if (absMs < 200) return 'good';
-  if (absMs < 1000) return 'warn';
+// v1.0.0: pipeline-lag colour bands match the Layer 1/2 framework.
+//   < 500 ms  → normal pipeline (green)
+//   < 5000 ms → slow pipeline   (warn)
+//   ≥ 5000 ms → Layer 2 drift   (bad)
+function pipelineLagColorClass(absMs) {
+  if (absMs < 500) return 'good';
+  if (absMs < 5000) return 'warn';
   return 'bad';
 }
 
+// v1.0.0: hero #2 health bands. Drift-magnitude buckets per the Layer
+// 1/Layer 2 framework. Computed from the live validators[] array, not
+// from a cached server-side severity field, so toggles like
+// hide-foundation immediately reflect in the prominent counts.
 function renderHero2() {
-  // Hero #2 numbers come from the live filtered population so the
-  // hide-foundation toggle actually affects the prominent counts.
-  // v0.6.0: Capybara delegation count was removed — stake-based business
-  // gating is out of scope for this dashboard.
   const visible = visibleValidators();
-  const counts = { critical: 0, high: 0, healthy: 0, foundation: 0 };
+  let normal = 0;
+  let slow = 0;
+  let drift = 0;
+  let foundation = 0;
   for (const v of visible) {
-    if (v.is_foundation) counts.foundation++;
-    else if (v.severity === 'critical') counts.critical++;
-    else if (v.severity === 'high') counts.high++;
-    else if (v.severity === 'healthy') counts.healthy++;
+    if (v.is_foundation) {
+      foundation += 1;
+      continue;
+    }
+    const a = Math.abs(v.mean_drift_ms || 0);
+    if (a >= 5000) drift += 1;
+    else if (a >= 500) slow += 1;
+    else normal += 1;
   }
-  el.nCritical.textContent = formatInt(counts.critical);
-  el.nHigh.textContent = formatInt(counts.high);
-  el.nHealthy.textContent = formatInt(counts.healthy);
-  el.nFoundation.textContent = formatInt(counts.foundation);
+  if (el.healthNormalCount) el.healthNormalCount.textContent = formatInt(normal);
+  if (el.healthSlowCount) el.healthSlowCount.textContent = formatInt(slow);
+  if (el.healthDriftCount) el.healthDriftCount.textContent = formatInt(drift);
+  if (el.healthFoundationCount) el.healthFoundationCount.textContent = formatInt(foundation);
+}
+
+// v1.0.0: severity classification for badges, replacing the legacy
+// critical/high/healthy strings. Returns the i18n key for the badge
+// label plus a CSS class and an icon. Foundation rows are tagged
+// upstream by render code (the 🏛️ marker) and don't pass through here.
+function severityFor(driftMs) {
+  const abs = Math.abs(driftMs || 0);
+  if (abs >= 5000) {
+    return { cssClass: 'severity-layer2', labelKey: 'severity_layer2', icon: '🔴' };
+  }
+  if (abs >= 500) {
+    return {
+      cssClass: 'severity-pipeline-slow',
+      labelKey: 'severity_pipeline_slow',
+      icon: '⚠️',
+    };
+  }
+  return { cssClass: 'severity-normal', labelKey: 'severity_normal', icon: '✅' };
 }
 
 function renderClock() {
@@ -617,7 +751,9 @@ function tickWallClock() {
   if (el.clockWall) {
     el.clockWall.textContent = `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}.${ms} UTC`;
   }
-  tickHero1();
+  // v1.0.0: hero #1 no longer has a chain-time / real-utc dual readout
+  // (replaced by a single pipeline-lag figure that updates per refresh
+  // cycle, not per wall-clock tick), so no per-tick hero #1 work here.
 }
 
 let chartHistory = null;
@@ -1148,6 +1284,35 @@ function renderBestSynced() {
   });
 }
 
+// v1.0.0 Tier 2: Layer 2 clock drift table. Source data is
+// `clock_drift.json` (or, on a pre-v1.0 snapshot, the |drift| ≥ 5s
+// slice of worst_validators.json — see loadAll). Rendered compact:
+// no pagination, no severity filter, no stake-floor lens — Layer 2
+// drift entries are operationally rare (typically 0–3 validators).
+function renderClockDriftTable() {
+  if (!el.clockDriftBody) return;
+  el.clockDriftBody.innerHTML = '';
+  const rows = Array.isArray(state.clockDrift) ? state.clockDrift : [];
+  if (rows.length === 0) {
+    if (el.clockDriftEmpty) el.clockDriftEmpty.hidden = false;
+    return;
+  }
+  if (el.clockDriftEmpty) el.clockDriftEmpty.hidden = true;
+  rows.forEach((v, i) => {
+    const tr = document.createElement('tr');
+    tr.classList.add('row-severity-layer2');
+    const pubkey = v.vote_account || v.pubkey;
+    const modalData = { ...v, pubkey };
+    tr.appendChild(td(String(v.rank ?? i + 1)));
+    tr.appendChild(pubkeyCell(pubkey, modalData));
+    tr.appendChild(driftTd(v.mean_drift_ms));
+    tr.appendChild(td(formatMsRaw(v.stddev_drift_ms), { num: true }));
+    tr.appendChild(td(formatInt(v.n_samples), { num: true }));
+    tr.appendChild(td(formatNum(v.stake_xnt, 0), { num: true }));
+    el.clockDriftBody.appendChild(tr);
+  });
+}
+
 function renderFoundation() {
   el.foundationBody.innerHTML = '';
   if (!Array.isArray(state.foundation) || state.foundation.length === 0) return;
@@ -1211,8 +1376,11 @@ function sortFiltered() {
     if (key === 'mean_drift_ms_abs') {
       av = Math.abs(a.mean_drift_ms); bv = Math.abs(b.mean_drift_ms);
     } else if (key === 'severity') {
-      const order = { critical: 4, high: 3, foundation: 2, healthy: 1 };
-      av = order[a.severity] || 0; bv = order[b.severity] || 0;
+      // v1.0.0: severity ordering follows the drift-magnitude bands
+      // used by severityFor() (Layer 2 > slow pipeline > normal),
+      // not the legacy critical/high/healthy strings.
+      av = Math.abs(a.mean_drift_ms || 0);
+      bv = Math.abs(b.mean_drift_ms || 0);
     } else if (key === 'pubkey') {
       // v0.5.0: worst entries use `vote_account`; validators use `pubkey`.
       av = a.vote_account || a.pubkey || ''; bv = b.vote_account || b.pubkey || '';
@@ -1231,10 +1399,11 @@ function renderWorstTable() {
   el.worstBody.innerHTML = '';
   slice.forEach((v, i) => {
     const tr = document.createElement('tr');
-    // v0.4.1: row tint follows severity only. Foundation status is shown
-    // by the 🏛️ badge in the severity cell, not by background colour, so
-    // an X1 Labs node with critical drift goes red — same as any other.
-    tr.classList.add(`row-${v.severity || 'unknown'}`);
+    // v1.0.0: row tint follows the severity band assigned by severityFor()
+    // so the table styling agrees with the badge in the same row. Tier 1
+    // (this table) only contains 500 ms ≤ |lag| < 5 s entries, so the
+    // tint is dominated by the slow-pipeline class.
+    tr.classList.add(`row-${severityFor(v.mean_drift_ms).cssClass}`);
     // v0.5.0: source data is `worst_validators.json` which uses
     // `vote_account` as the pubkey field; modal/click handlers look
     // for `.pubkey`, so normalize here.
@@ -1257,35 +1426,19 @@ function renderWorstTable() {
 }
 
 function severityCell(v) {
-  // v0.4.1: severity icon and foundation badge are independent. A
-  // foundation node with critical drift now shows BOTH 🚨 and 🏛️ —
-  // pre-fix, the foundation icon hid the severity.
+  // v1.0.0: Layer 1/Layer 2 framework. Classification comes from the
+  // drift magnitude directly so the badge agrees with how the dashboard
+  // bins validators in hero #2 and the Anomalies section. Foundation
+  // status is rendered as an independent 🏛️ badge — a foundation node
+  // with Layer 2 drift (extremely unlikely) would show both 🔴 and 🏛️.
   const e = document.createElement('td');
   e.classList.add('severity-cell');
+  const sev = severityFor(v.mean_drift_ms);
+  const t = I18N[state.lang];
   const sevIcon = document.createElement('span');
-  sevIcon.classList.add('sev-icon');
-  switch (v.severity) {
-    case 'critical':
-      sevIcon.textContent = '🚨';
-      sevIcon.classList.add('sev-critical');
-      sevIcon.title = 'Critical: drift > 5s';
-      break;
-    case 'high':
-      sevIcon.textContent = '⚠️';
-      sevIcon.classList.add('sev-high');
-      sevIcon.title = 'High: drift 1–5s';
-      break;
-    case 'healthy':
-      sevIcon.textContent = '✅';
-      sevIcon.classList.add('sev-healthy');
-      sevIcon.title = 'Healthy: drift < 1s';
-      break;
-    default:
-      sevIcon.textContent = '·';
-      sevIcon.classList.add('sev-unknown');
-      sevIcon.title = 'Insufficient data';
-      break;
-  }
+  sevIcon.classList.add('sev-icon', sev.cssClass);
+  sevIcon.textContent = sev.icon;
+  sevIcon.title = t[sev.labelKey] || sev.labelKey;
   e.appendChild(sevIcon);
   if (v.is_foundation) {
     const foundationBadge = document.createElement('span');
