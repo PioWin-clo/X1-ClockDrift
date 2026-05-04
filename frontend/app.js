@@ -115,6 +115,27 @@ const I18N = {
     methodology_link: 'methodology',
     methodology_cta: 'Full details:',
 
+    // v1.1.0 — diagnostic snapshot widget (between Hero #2 and chart)
+    diagnostic_snapshot_title: 'Network diagnostic snapshot',
+    diagnostic_snapshot_subtitle: 'Side-by-side: pipeline health vs clock drift outliers',
+    layer_1_label: 'Layer 1',
+    layer_2_label: 'Layer 2',
+    snapshot_pipeline_title: 'Vote pipeline latency',
+    snapshot_pipeline_baseline: 'Baseline:',
+    snapshot_pipeline_help: 'Network-wide median lag from vote creation to block inclusion. ~400-850 ms is healthy Tachyon protocol behavior.',
+    snapshot_drift_title: 'Clock drift outliers',
+    snapshot_drift_worst: 'Worst:',
+    snapshot_drift_help: 'Validators with |drift| ≥ 5 seconds — genuine NTP/chrony misconfiguration. Full list in the Anomalies section below.',
+    validators_label: 'validators',
+    snapshot_status_healthy: 'Healthy — within baseline',
+    snapshot_status_elevated: 'Elevated — investigate',
+    snapshot_status_disrupted: 'Disrupted — check Foundation trend',
+    snapshot_status_no_drift: 'No clock drift detected',
+    snapshot_status_with_drift: 'validators with broken clocks',
+    diagnostic_cta_text: 'Operating a validator? Find your row in the tables below, then check the ',
+    diagnostic_cta_link: 'step-by-step diagnostic guide',
+    diagnostic_cta_suffix: ' for fix instructions.',
+
     foundation_table_title: '🏛️ X1 Labs Foundation',
     foundation_table_help: 'Official X1 Labs infrastructure. Shown separately because their drift is operational baseline, not validator misconfiguration.',
 
@@ -281,6 +302,27 @@ const I18N = {
     methodology_link: 'metodologia',
     methodology_cta: 'Pełne szczegóły:',
 
+    // v1.1.0 — diagnostyczny snapshot
+    diagnostic_snapshot_title: 'Diagnostyczny snapshot sieci',
+    diagnostic_snapshot_subtitle: 'Side-by-side: stan pipeline vs odchylenia zegarów',
+    layer_1_label: 'Layer 1',
+    layer_2_label: 'Layer 2',
+    snapshot_pipeline_title: 'Opóźnienie pipeline głosowania',
+    snapshot_pipeline_baseline: 'Baseline:',
+    snapshot_pipeline_help: 'Mediana opóźnienia w sieci od utworzenia vote do włączenia do bloku. ~400-850 ms to zdrowe zachowanie protokołu Tachyon.',
+    snapshot_drift_title: 'Odchylenia zegarów',
+    snapshot_drift_worst: 'Najgorszy:',
+    snapshot_drift_help: 'Walidatorzy z |dryf| ≥ 5 sekund — realna błędna konfiguracja NTP/chrony. Pełna lista w sekcji Anomalie poniżej.',
+    validators_label: 'walidatorów',
+    snapshot_status_healthy: 'Zdrowy — w zakresie baseline’u',
+    snapshot_status_elevated: 'Podwyższony — sprawdź',
+    snapshot_status_disrupted: 'Zaburzony — sprawdź Foundation trend',
+    snapshot_status_no_drift: 'Brak dryfu zegarów',
+    snapshot_status_with_drift: 'walidatorów z błędnymi zegarami',
+    diagnostic_cta_text: 'Operujesz walidator? Znajdź swój wiersz w tabelach poniżej, a następnie zobacz ',
+    diagnostic_cta_link: 'instrukcję diagnostyki krok po kroku',
+    diagnostic_cta_suffix: ' z instrukcjami napraw.',
+
     foundation_table_title: '🏛️ X1 Labs Foundation',
     foundation_table_help: 'Oficjalna infrastruktura X1 Labs. Pokazana osobno bo ich dryf jest baseline operacyjnym, nie błędem konfiguracji walidatora.',
 
@@ -400,6 +442,13 @@ function bindElements() {
   el.worstBody = document.getElementById('worst-body');
   el.clockDriftBody = document.getElementById('clock-drift-body');
   el.clockDriftEmpty = document.getElementById('clock-drift-empty');
+  // v1.1.0: diagnostic snapshot widget (between Hero #2 and chart-block).
+  el.snapshotPipelineCurrent = document.getElementById('snapshot-pipeline-current');
+  el.snapshotPipelineStatus = document.getElementById('snapshot-pipeline-status');
+  el.snapshotPipelineBaseline = document.getElementById('snapshot-pipeline-baseline');
+  el.snapshotDriftCount = document.getElementById('snapshot-drift-count');
+  el.snapshotDriftStatus = document.getElementById('snapshot-drift-status');
+  el.snapshotDriftWorst = document.getElementById('snapshot-drift-worst');
   el.bestSyncedBody = document.getElementById('best-synced-body');
   el.foundationBody = document.getElementById('foundation-body');
   el.sourcesBody = document.getElementById('sources-body');
@@ -605,6 +654,7 @@ function renderAll() {
   renderHeader();
   renderHero1();
   renderHero2();
+  renderDiagnosticSnapshot();  // v1.1.0
   renderClock();
   renderHistoryChart();
   renderFoundationTrend();    // v0.5.0
@@ -699,6 +749,107 @@ function severityFor(driftMs) {
     };
   }
   return { cssClass: 'severity-normal', labelKey: 'severity_normal', icon: '✅' };
+}
+
+// v1.1.0: diagnostic snapshot — at-a-glance side-by-side health for
+// Layer 1 (current pipeline lag vs foundation baseline) and Layer 2
+// (count of validators with |drift| ≥ 5 s, plus the worst entry).
+//
+// Design constraints:
+//   * Pipeline current is the most recent network bucket from history.json
+//     (5-minute resolution), not summary.json's drift_ms_now — the latter
+//     is a single instantaneous reading; the bucket median absorbs jitter.
+//   * Baseline is the foundation cluster's 7-day pipeline average from
+//     foundation_drift_trend.json, with extreme spikes (|x| ≥ 5 s)
+//     filtered out. Falls back to -800 ms (Theo's documented Layer 1
+//     baseline) if foundation data is unavailable, so the widget still
+//     renders something useful on a cold-start snapshot.
+//   * Status thresholds (200 ms / 500 ms deviation from baseline) match
+//     the methodology guide's Tier 1 boundary.
+const PIPELINE_BASELINE_FALLBACK_MS = -800;
+const PIPELINE_STATUS_HEALTHY_DEV_MS = 200;
+const PIPELINE_STATUS_ELEVATED_DEV_MS = 500;
+const FOUNDATION_BASELINE_LOOKBACK_BUCKETS = 168; // 7 d × 24 h × 1 bucket/h
+
+function renderDiagnosticSnapshot() {
+  const t = I18N[state.lang];
+
+  // ---- LEFT card: Layer 1 pipeline lag ----
+  // Latest history bucket gives the freshest aggregate signal. Empty
+  // history means we just started up — leave the dashes alone.
+  const history = Array.isArray(state.history) ? state.history : [];
+  const latestBucket = history[history.length - 1];
+  const pipelineCurrentMs = latestBucket
+    ? latestBucket.median_drift_ms
+    : null;
+
+  // Foundation cluster as the protocol baseline. Slice the last week of
+  // hourly buckets and average the avg_drift_ms field, dropping any
+  // bucket where |x| ≥ 5 s (those would be Layer-2-style anomalies and
+  // shouldn't define "normal").
+  const foundationTrend = Array.isArray(state.foundationTrend)
+    ? state.foundationTrend
+    : [];
+  const recentFoundation = foundationTrend.slice(-FOUNDATION_BASELINE_LOOKBACK_BUCKETS);
+  const validBaseline = recentFoundation
+    .map((b) => b.avg_drift_ms)
+    .filter((v) => typeof v === 'number' && Math.abs(v) < 5000);
+  const baselineMs = validBaseline.length > 0
+    ? validBaseline.reduce((a, b) => a + b, 0) / validBaseline.length
+    : PIPELINE_BASELINE_FALLBACK_MS;
+
+  if (el.snapshotPipelineCurrent && el.snapshotPipelineStatus && el.snapshotPipelineBaseline) {
+    el.snapshotPipelineBaseline.textContent = baselineMs.toFixed(0);
+
+    if (typeof pipelineCurrentMs === 'number') {
+      el.snapshotPipelineCurrent.textContent = pipelineCurrentMs.toFixed(0);
+      el.snapshotPipelineCurrent.className = 'metric-value mono';
+      const deviation = Math.abs(pipelineCurrentMs - baselineMs);
+      let statusClass;
+      let statusText;
+      if (deviation < PIPELINE_STATUS_HEALTHY_DEV_MS) {
+        statusClass = 'status-healthy';
+        statusText = `✅ ${t.snapshot_status_healthy}`;
+      } else if (deviation < PIPELINE_STATUS_ELEVATED_DEV_MS) {
+        statusClass = 'status-elevated';
+        statusText = `⚠️ ${t.snapshot_status_elevated}`;
+      } else {
+        statusClass = 'status-disrupted';
+        statusText = `🔴 ${t.snapshot_status_disrupted}`;
+      }
+      el.snapshotPipelineCurrent.classList.add(statusClass);
+      el.snapshotPipelineStatus.textContent = statusText;
+    } else {
+      el.snapshotPipelineCurrent.textContent = '—';
+      el.snapshotPipelineCurrent.className = 'metric-value mono';
+      el.snapshotPipelineStatus.textContent = '—';
+    }
+  }
+
+  // ---- RIGHT card: Layer 2 clock-drift outliers ----
+  // clock_drift.json is already filtered to |drift| ≥ 5 s and sorted by
+  // ABS(drift) DESC, so the count and worst entry are direct reads.
+  const driftRows = Array.isArray(state.clockDrift) ? state.clockDrift : [];
+  if (el.snapshotDriftCount && el.snapshotDriftStatus && el.snapshotDriftWorst) {
+    el.snapshotDriftCount.textContent = String(driftRows.length);
+    el.snapshotDriftCount.className = 'metric-value mono';
+
+    if (driftRows.length === 0) {
+      el.snapshotDriftCount.classList.add('status-clean');
+      el.snapshotDriftStatus.textContent = `✅ ${t.snapshot_status_no_drift}`;
+      el.snapshotDriftWorst.textContent = '—';
+    } else {
+      el.snapshotDriftCount.classList.add('status-warning');
+      el.snapshotDriftStatus.textContent =
+        `🔴 ${driftRows.length} ${t.snapshot_status_with_drift}`;
+      const worst = driftRows[0];
+      const pubkey = worst.vote_account || worst.pubkey || '';
+      const driftSec = ((worst.mean_drift_ms || 0) / 1000).toFixed(1);
+      const sign = (worst.mean_drift_ms || 0) >= 0 ? '+' : '−';
+      el.snapshotDriftWorst.textContent =
+        `${sign}${Math.abs(parseFloat(driftSec)).toFixed(1)} s · ${shorten(pubkey)}`;
+    }
+  }
 }
 
 function renderClock() {
