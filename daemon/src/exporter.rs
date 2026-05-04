@@ -15,11 +15,19 @@ const BEST_SYNCED_TOP_N: i64 = 10;
 /// for "best" claims. Foundation excluded inside the SQL.
 const BEST_SYNCED_MIN_SAMPLES: i64 = 100;
 const LAMPORTS_PER_XNT: f64 = 1_000_000_000.0;
-/// v0.6.0: server-side worst-validators ranking. Filters are
-/// statistical/definitional only — no stake-based business logic. A
-/// 2-XNT validator with -23s drift is operationally newsworthy
-/// regardless of stake. Frontend offers an optional client-side stake
-/// lens for users who want to focus on a specific stake band.
+/// v1.0.0 Layer 1/Layer 2 framework: the legacy combined "worst" ranking
+/// is split into two tiers, each exported as its own JSON. The frontend
+/// renders them as separate tables under "Anomalies & deviations" so
+/// pipeline issues (operator should investigate infra) don't get
+/// conflated with genuine clock drift (operator must fix NTP/chrony).
+///
+/// `worst_validators.json` continues to be written for one release so
+/// external consumers don't 404. Removal scheduled for v1.1.0.
+const PIPELINE_ANOMALIES_TOP_N: i64 = 100; // 500 ≤ |lag| < 5000 ms
+const CLOCK_DRIFT_TOP_N: i64 = 50;         // |drift| ≥ 5000 ms
+/// Legacy v0.6.0 worst combined ranking — DEPRECATED, kept for one
+/// release. Only used to write `worst_validators.json` while consumers
+/// migrate to the split tier endpoints.
 const WORST_TOP_N: i64 = 100;
 const WORST_MIN_SAMPLES: i64 = 20;
 const WORST_MIN_ABS_DRIFT_MS: f64 = 500.0;
@@ -530,11 +538,35 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         })
         .collect();
 
-    // v0.6.0: server-side worst-validators ranking — statistical/
-    // definitional filters only (n>=20, |drift|>=500ms). Stake gate
-    // removed: a 2-XNT validator with -23s drift is operationally
-    // newsworthy regardless of stake. Frontend offers an optional
-    // client-side stake filter for users who want a stake lens.
+    // v1.0.0 Layer 1/Layer 2 split: pipeline anomalies (Tier 1) and
+    // genuine clock drift (Tier 2) are now separate exports. The
+    // frontend renders them as distinct tables under "Anomalies &
+    // deviations" so a 2-XNT validator with -23s drift (real Layer 2
+    // misconfig) doesn't get visually mixed with a 100k-XNT validator
+    // sitting at -1.2s lag (slow pipeline / network / CPU saturation).
+    let pipeline_rows = db::get_pipeline_anomalies(pool, PIPELINE_ANOMALIES_TOP_N)
+        .await
+        .unwrap_or_default();
+    let pipeline_json: Vec<WorstValidatorJson> = pipeline_rows
+        .into_iter()
+        .enumerate()
+        .map(|(idx, s)| worst_to_json(idx, s))
+        .collect();
+
+    let clock_drift_rows = db::get_clock_drift_validators(pool, CLOCK_DRIFT_TOP_N)
+        .await
+        .unwrap_or_default();
+    let clock_drift_json: Vec<WorstValidatorJson> = clock_drift_rows
+        .into_iter()
+        .enumerate()
+        .map(|(idx, s)| worst_to_json(idx, s))
+        .collect();
+
+    // v1.0.0: legacy combined ranking — kept for one release while
+    // external consumers migrate to the split tier endpoints. Logged
+    // once per cycle so we notice if anyone is still relying on it.
+    // Removal scheduled for v1.1.0.
+    #[allow(deprecated)]
     let worst_rows = db::get_worst_validators(
         pool,
         WORST_TOP_N,
@@ -546,25 +578,14 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
     let worst_json: Vec<WorstValidatorJson> = worst_rows
         .into_iter()
         .enumerate()
-        .map(|(idx, s)| {
-            let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
-            WorstValidatorJson {
-                rank: (idx as i64) + 1,
-                vote_account: s.validator,
-                n_samples: s.n_samples,
-                mean_drift_ms: s.mean_drift_ms,
-                median_drift_ms: s.median_drift_ms,
-                stddev_drift_ms: s.stddev_drift_ms,
-                p10_drift_ms: s.p10_drift_ms,
-                p90_drift_ms: s.p90_drift_ms,
-                stake_lamports: s.last_stake_lamports,
-                stake_xnt,
-                is_foundation: s.is_foundation,
-                foundation_label: s.foundation_label,
-                severity: s.severity,
-            }
-        })
+        .map(|(idx, s)| worst_to_json(idx, s))
         .collect();
+    tracing::warn!(
+        target: "exporter",
+        "worst_validators.json is DEPRECATED in v1.0.0; use \
+         pipeline_anomalies.json (Tier 1) and clock_drift.json (Tier 2). \
+         Removal scheduled for v1.1.0."
+    );
 
     // v0.5.0: foundation drift trend — 14 days × 1h buckets for the
     // 12-node X1 Labs cluster. Lets operators see whether X1 Labs
@@ -612,6 +633,10 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
     write_atomic(&data_dir.join("history.json"), &history_json).await?;
     write_atomic(&data_dir.join("meta.json"), &meta).await?;
     write_atomic(&data_dir.join("best_validators.json"), &best_json).await?;
+    // v1.0.0: split worst into Tier 1 (pipeline anomalies) + Tier 2
+    // (clock drift). worst_validators.json kept for one release.
+    write_atomic(&data_dir.join("pipeline_anomalies.json"), &pipeline_json).await?;
+    write_atomic(&data_dir.join("clock_drift.json"), &clock_drift_json).await?;
     write_atomic(&data_dir.join("worst_validators.json"), &worst_json).await?;
     write_atomic(&data_dir.join("chrony.json"), &chrony_json).await?;
     write_atomic(&data_dir.join("foundation.json"), &foundation_json).await?;
@@ -625,7 +650,9 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         n_validators = summary.n_validators_observed,
         n_samples_24h = summary.n_samples_24h,
         n_best = best_json.len(),
-        n_worst = worst_json.len(),
+        n_pipeline_anomalies = pipeline_json.len(),
+        n_clock_drift = clock_drift_json.len(),
+        n_worst_legacy = worst_json.len(),
         n_foundation = foundation_json.len(),
         n_foundation_trend = foundation_trend.len(),
         chrony_sources = chrony_json.sources.len(),
@@ -636,6 +663,28 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         "wrote JSON exports"
     );
     Ok(())
+}
+
+/// v1.0.0: shared mapper used by Tier 1, Tier 2, and the legacy combined
+/// ranking. All three queries return the same `ValidatorSummary` shape
+/// and project to the same `WorstValidatorJson` schema.
+fn worst_to_json(idx: usize, s: db::ValidatorSummary) -> WorstValidatorJson {
+    let stake_xnt = s.last_stake_lamports as f64 / LAMPORTS_PER_XNT;
+    WorstValidatorJson {
+        rank: (idx as i64) + 1,
+        vote_account: s.validator,
+        n_samples: s.n_samples,
+        mean_drift_ms: s.mean_drift_ms,
+        median_drift_ms: s.median_drift_ms,
+        stddev_drift_ms: s.stddev_drift_ms,
+        p10_drift_ms: s.p10_drift_ms,
+        p90_drift_ms: s.p90_drift_ms,
+        stake_lamports: s.last_stake_lamports,
+        stake_xnt,
+        is_foundation: s.is_foundation,
+        foundation_label: s.foundation_label,
+        severity: s.severity,
+    }
 }
 
 /// Plain mean and population stddev. Returns (0, 0) for empty input.

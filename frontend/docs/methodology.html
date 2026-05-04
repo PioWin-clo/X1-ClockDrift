@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X1-ClockDrift — Methodology</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  /* Methodology-page-only typography overrides. We share the site theme
+     via ../style.css for tokens (colors, monospace) but the prose layout
+     here is single-column and reading-width, not the dashboard grid. */
+  .doc {
+    max-width: 72ch;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+    line-height: 1.6;
+  }
+  .doc h1 { font-size: 26px; margin: 0 0 8px; }
+  .doc h2 {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 32px 0 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .doc h2:first-of-type { border-top: 0; padding-top: 0; }
+  .doc h3 { font-size: 15px; font-weight: 700; margin: 20px 0 6px; }
+  .doc p { margin: 0 0 12px; }
+  .doc ul, .doc ol { margin: 0 0 12px 24px; padding: 0; }
+  .doc li { margin-bottom: 4px; }
+  .doc code, .doc pre { font-family: var(--mono); }
+  .doc code {
+    background: var(--surface-2);
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .doc pre {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .doc pre code { background: transparent; border: 0; padding: 0; }
+  .doc blockquote {
+    margin: 12px 0;
+    padding: 8px 16px;
+    border-left: 3px solid var(--accent);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+  .doc .layer-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 6px;
+  }
+  .doc .layer-tag.layer-1 { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+  .doc .layer-tag.layer-2 { background: rgba(248, 81, 73, 0.15); color: var(--bad); }
+  .doc .nav-back {
+    display: inline-block;
+    margin-bottom: 16px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    border-bottom: 1px dotted var(--accent);
+  }
+  .doc .nav-back:hover { color: var(--text); border-bottom-color: var(--text); }
+  .doc dl { margin: 0 0 12px; }
+  .doc dt { font-weight: 700; margin-top: 8px; }
+  .doc dd { margin-left: 16px; color: var(--text-dim); }
+  .doc table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 13px;
+  }
+  .doc th, .doc td {
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .doc th { color: var(--text-dim); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <a href="../index.html" class="nav-back">← Back to dashboard</a>
+
+  <h1>X1-ClockDrift — Methodology</h1>
+  <p style="color: var(--text-dim); font-size: 14px; margin-top: 0;">
+    How this dashboard interprets time signals on the X1 blockchain — and
+    why distinguishing pipeline latency from clock drift matters.
+  </p>
+
+  <h2>What this dashboard measures</h2>
+  <p>
+    X1-ClockDrift monitors <strong>two distinct layers</strong> affecting
+    time on the X1 blockchain:
+  </p>
+  <ul>
+    <li><span class="layer-tag layer-1">Layer 1</span><strong>Vote pipeline latency</strong> — ~400-850 ms baseline, inherent to Tachyon protocol</li>
+    <li><span class="layer-tag layer-2">Layer 2</span><strong>Clock drift</strong> — rare, but operationally relevant</li>
+  </ul>
+  <p>
+    These are different phenomena with different causes and different
+    fixes. Conflating them — as earlier versions of this dashboard did —
+    produces misleading conclusions. The v1.0.0 refactor explicitly
+    separates the two so each gets the framing it deserves.
+  </p>
+
+  <h2><span class="layer-tag layer-1">Layer 1</span>Vote pipeline latency</h2>
+  <p>
+    Every vote on Tachyon (the Solana fork powering X1) goes through a
+    pipeline:
+  </p>
+  <ol>
+    <li>Validator creates vote (timestamp = local UTC) — ~50-100 ms signing &amp; serialization</li>
+    <li>Vote propagates via gossip to the current leader — ~200-400 ms</li>
+    <li>Leader packs vote into next block — ~100-200 ms</li>
+    <li>Block finalized and visible on-chain — ~50-150 ms</li>
+  </ol>
+  <p>
+    <strong>Total: ~400-850 ms.</strong> This is inherent to the protocol
+    — not a bug, not something operators can &ldquo;fix&rdquo;.
+  </p>
+  <p>
+    When this dashboard shows the X1 chain as &ldquo;-800 ms behind real
+    UTC&rdquo;, it is measuring this pipeline latency, not validator
+    clock errors.
+  </p>
+  <h3>Proof this is protocol-level, not clock drift</h3>
+  <p>
+    All 12 X1 Labs foundation nodes show identical -842 to -844 ms
+    offset. If their clocks were misconfigured, each would show
+    different values. <strong>Identical signatures across well-managed
+    nodes prove the offset comes from the protocol, not the
+    operators.</strong>
+  </p>
+  <blockquote>
+    Theo (X1 Labs), on the Layer 1/Layer 2 distinction (personal
+    communication, X1 Labs Telegram): &ldquo;If it were clock drift,
+    every validator would have different offset. Identical signal =
+    pipeline, not drift.&rdquo;
+  </blockquote>
+
+  <h2><span class="layer-tag layer-2">Layer 2</span>Clock drift</h2>
+  <p>
+    Some validators have genuinely broken NTP/chrony configurations.
+    Their system clocks drift by seconds or minutes from real UTC.
+    Examples observed on X1 mainnet:
+  </p>
+  <ul>
+    <li>One operator: -24 seconds drift</li>
+    <li>Several operators: -10 to -30 seconds</li>
+  </ul>
+  <p>
+    This <em>is</em> clock drift in the traditional sense. Operators
+    fix it by configuring chrony correctly with stratum-1 NTP sources.
+  </p>
+  <p>
+    <strong>Note:</strong> the Strontium oracle (a separate X1 Labs
+    project) corrects <code>Clock::unix_timestamp</code> at protocol
+    level so chain consumers see correct UTC time even when individual
+    validators drift. This dashboard observes the raw measurement before
+    that correction.
+  </p>
+
+  <h2>Quick reference</h2>
+  <table>
+    <thead>
+      <tr><th>Signal</th><th>Layer 1 — Pipeline</th><th>Layer 2 — Drift</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Source</td><td>Tachyon vote consensus</td><td>Validator system clock</td></tr>
+      <tr><td>Magnitude</td><td>~400-850 ms</td><td>seconds to minutes</td></tr>
+      <tr><td>Per-validator pattern</td><td>Identical across well-synced nodes</td><td>Different per validator</td></tr>
+      <tr><td>Stable over time?</td><td>Yes (protocol-level)</td><td>Often grows / drifts</td></tr>
+      <tr><td>Operator can fix?</td><td>No (inherent to protocol)</td><td>Yes (NTP/chrony config)</td></tr>
+      <tr><td>This dashboard label</td><td><code>vote pipeline latency</code></td><td><code>clock drift</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>How to read each section</h2>
+
+  <h3>X1 vote pipeline latency vs UTC (top hero card)</h3>
+  <p>
+    Shows current chain pipeline lag. Stable ~-800 ms = healthy. Sudden
+    swings or values &gt; 2 s = network stress, deployments, or load
+    events.
+  </p>
+
+  <h3>Validator pipeline health (4-card breakdown)</h3>
+  <ul>
+    <li><strong>Normal pipeline</strong> (|deviation| &lt; 500 ms): healthy validators</li>
+    <li><strong>Slow pipeline</strong> (500 ms – 5 s): elevated latency, investigate network/CPU</li>
+    <li><strong>Clock drift</strong> (|drift| ≥ 5 s): genuine Layer 2 issue, operator action needed</li>
+    <li><strong>X1 Labs</strong>: foundation baseline reference (12 nodes)</li>
+  </ul>
+
+  <h3>Vote pipeline latency over time (chart)</h3>
+  <p>
+    Aggregate latency across the network. Watch for:
+  </p>
+  <ul>
+    <li>Sudden shifts &gt; 200 ms in foundation baseline = X1 Labs operational change</li>
+    <li>Spikes &gt; 5 seconds = chain-time anomaly (load event, leader skips, deployment)</li>
+  </ul>
+
+  <h3>Anomalies &amp; deviations (split tables)</h3>
+  <ul>
+    <li><strong>Tier 1 — Pipeline anomalies:</strong> 500 ms ≤ |lag| &lt; 5 s. Slow but not drift; infra investigation territory.</li>
+    <li><strong>Tier 2 — Clock drift:</strong> |drift| ≥ 5 s. Real misconfiguration; operator must fix NTP/chrony.</li>
+  </ul>
+
+  <h2>Measurement methodology</h2>
+
+  <h3>Reference clock</h3>
+  <p>
+    The Sentinel server (the host running this daemon) synchronizes via
+    chrony to multiple stratum-1 atomic time sources:
+  </p>
+  <ul>
+    <li>PTB Germany (<code>ptbtime1-3.ptb.de</code>)</li>
+    <li>GUM Poland (<code>tempus1-3.gum.gov.pl</code>)</li>
+    <li>CESNET Czechia (<code>tak.cesnet.cz</code>, <code>tik.cesnet.cz</code>)</li>
+    <li>Netnod Sweden (<code>sth1-2.ntp.netnod.se</code>)</li>
+  </ul>
+  <p>
+    Sentinel offset to UTC consensus is typically ±50 µs with RMS ~30 µs.
+    This is atomic-level precision — far below any threshold relevant
+    for this dashboard&rsquo;s measurements.
+  </p>
+
+  <h3>Drift / lag calculation</h3>
+  <pre><code>drift_ms = (vote_timestamp_in_chain_ms) − (sentinel_local_observation_ms)</code></pre>
+  <p>
+    For each vote on-chain, we record:
+  </p>
+  <dl>
+    <dt><code>ts_chain</code></dt>
+    <dd>timestamp the validator wrote in their <code>Vote</code> instruction (local UTC at vote-creation time)</dd>
+    <dt><code>ts_local_us</code></dt>
+    <dd>when the Sentinel observed the slot containing that vote (microsecond precision, atomic-disciplined clock)</dd>
+  </dl>
+  <p>
+    The difference is the validator&rsquo;s pipeline latency (if in
+    normal range) or clock drift (if extreme).
+  </p>
+
+  <h3>Aggregation</h3>
+  <p>
+    5-minute buckets, computed via SQL median/mean over all votes from
+    each validator in the bucket. Validators with &lt;100 samples in 24 h
+    are excluded from the &ldquo;top pipeline efficient&rdquo; ranking
+    to avoid statistical noise. The Anomalies tables use a softer floor
+    (≥20 samples) so early operational signals aren&rsquo;t suppressed.
+  </p>
+
+  <h3>Foundation cluster</h3>
+  <p>
+    12 X1 Labs operated nodes (verified via <a href="https://x1val.online" target="_blank" rel="noreferrer noopener">x1val.online</a> listings) shown
+    separately because their drift is operational baseline, not
+    validator misconfiguration. The foundation pipeline trend chart
+    over 14 days is the most sensitive indicator of X1 Labs operational
+    changes — sudden &gt;100 ms shifts in the avg-lag line correspond
+    to Tachyon config changes, NTP source swaps, or deployments.
+  </p>
+
+  <h2>Limitations &amp; caveats</h2>
+  <ul>
+    <li>
+      We measure what&rsquo;s written in the chain, not validator system
+      clocks directly. Clock-drift inferred from drift &gt; 5 s assumes
+      pipeline contribution is bounded.
+    </li>
+    <li>
+      Sentinel measurement adds ~1-5 ms of network latency to RPC calls;
+      this is well below our 500 ms classification threshold.
+    </li>
+    <li>
+      Stake-weighted average is dominated by foundation (~72% of total
+      stake). Median is more representative of &ldquo;typical&rdquo;
+      validator behavior.
+    </li>
+    <li>
+      We cannot fully distinguish &ldquo;validator clock correct,
+      pipeline slow&rdquo; from &ldquo;pipeline normal, clock off by the
+      same amount&rdquo; — these would look identical from outside. We
+      rely on the foundation baseline + multi-validator comparison to
+      identify the most likely cause.
+    </li>
+  </ul>
+
+  <h2>References</h2>
+  <ul>
+    <li>Theo (X1 Labs) on pipeline vs drift — personal communication, X1 Labs Telegram</li>
+    <li>Strontium oracle (Layer 2 protocol-level fix) — X1 Labs project, separate repository</li>
+    <li>Solana vote consensus mechanics: <a href="https://docs.solana.com/consensus" target="_blank" rel="noreferrer noopener">https://docs.solana.com/consensus</a></li>
+    <li>chrony documentation: <a href="https://chrony-project.org/" target="_blank" rel="noreferrer noopener">https://chrony-project.org/</a></li>
+    <li>This dashboard source: <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener">github.com/PioWin-clo/X1-ClockDrift</a></li>
+  </ul>
+
+  <h2>Version history</h2>
+  <ul>
+    <li><strong>v1.0.0</strong> — Layer 1/Layer 2 framework refactor + methodology page (this version)</li>
+    <li>v0.7.0 — Network drift chart window selector + outlier handling</li>
+    <li>v0.6.0 — Removed stake filters, added optional client-side stake lens</li>
+    <li>v0.5.0/v0.5.1 — Foundation drift trend, severity classification, Sentinel chart axis fix</li>
+    <li>v0.4.0 — Narrative pivot to chain time hero, foundation whitelist</li>
+    <li>v0.3.x — Initial deployment, raw drift measurement</li>
+  </ul>
+
+  <a href="../index.html" class="nav-back">← Back to dashboard</a>
+</div>
+</body>
+</html>

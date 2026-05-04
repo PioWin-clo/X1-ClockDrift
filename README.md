@@ -1,45 +1,67 @@
-# X1 ClockDrift
+# X1-ClockDrift
 
-Live measurement of `Clock::unix_timestamp` drift on the X1 blockchain.
+Public time-integrity monitor for the X1 blockchain.
 
-**Live dashboard**: https://piowin-clo.github.io/X1-ClockDrift/
+**Live dashboard:** <https://piowin-clo.github.io/X1-ClockDrift/>
 
-[Polski README](README.pl.md) · [Methodology](docs/methodology.md)
+**Methodology:** <https://piowin-clo.github.io/X1-ClockDrift/docs/methodology.html>
 
-## What this measures
+## What it does
 
-X1 (an SVM-fork of Solana, Tachyon validator client) produces a chain-wide
-`unix_timestamp` per slot. That value is the stake-weighted median of
-timestamps reported by all active validators in their vote instructions.
-This project measures, per validator, how far each validator's reported
-timestamp drifts from real UTC observed locally.
+X1-ClockDrift measures and visualizes time-related signals on X1 mainnet:
 
-For every slot frozen on the host validator, we record the local clock
-reading. From later blocks we collect every vote instruction, each of
-which carries the voting validator's reported timestamp for some prior
-slot. By joining these, we derive `drift = chain_timestamp − local_clock`
-for every (validator, slot) pair we can match.
+- **Layer 1 — Vote pipeline latency** (~400-850 ms baseline). The
+  inherent time it takes a validator's vote to appear on-chain on
+  Tachyon (the Solana fork powering X1). Sum of signing + gossip +
+  block inclusion. Identical across well-synchronized validators.
+- **Layer 2 — Clock drift** (rare). Validators whose system clocks are
+  misconfigured by 5+ seconds — genuine NTP/chrony issues operators
+  can fix.
+- **Foundation operational changes.** The 12-node X1 Labs cluster is
+  monitored as a baseline; sudden shifts in the foundation pipeline
+  trend indicate config changes, deployments, or load events.
+
+The dashboard explicitly distinguishes Layer 1 (pipeline latency,
+normal) from Layer 2 (clock drift, problematic) — a distinction that
+matters for correctly interpreting time-related signals on the chain,
+and one that earlier versions of this dashboard conflated.
+
+See the [methodology page](https://piowin-clo.github.io/X1-ClockDrift/docs/methodology.html)
+for the full framework, atomic time sources, drift formula, and
+limitations.
 
 ## Architecture
 
-- The daemon runs on a single X1 validator (the host).
-- It tails `validator.log` to obtain microsecond-precision local clock
-  readings of `bank frozen` events for **every** slot.
-- It queries the **public X1 RPC** (`https://rpc.mainnet.x1.xyz`) for
-  vote instructions, sampling **one block per ~500 slots (~3 minutes)**
-  — roughly **600 `getBlock` calls/day**, plus one `getVoteAccounts`
-  per hour for stake snapshots. We use the public RPC because the
-  local validator is started without `--full-rpc-api` and therefore
-  does not expose `getBlock`; we cannot modify validator config.
-  Vote instructions are returned pre-decoded via `encoding=jsonParsed`,
-  so no byte-level parsing is needed in the daemon.
-- A SQLite database accumulates raw observations and refreshed stake
-  snapshots.
-- Every 5 minutes the daemon recomputes per-validator and per-network
-  aggregates, exports JSON to a clone of this repository, and pushes
-  to the `data` branch.
-- The dashboard is the contents of the `data` branch served by GitHub
-  Pages.
+- **Daemon** (`x1cd`, in `daemon/`) — Rust service running on a
+  Sentinel host with chrony synchronized to multiple stratum-1 NTP
+  sources (PTB Germany, GUM Poland, CESNET Czechia, Netnod Sweden).
+  Tails `validator.log` for microsecond-precision local clock
+  readings of `bank frozen` events for every slot, and queries the
+  public X1 RPC (`https://rpc.mainnet.x1.xyz`) for vote instructions
+  via `getBlock` with `encoding=jsonParsed`.
+- **Storage** — SQLite, ~1 GB after several months of operation.
+- **Exporter** — recomputes per-validator and per-network aggregates
+  every 5 minutes, writes JSON, and pushes to the `data` branch via
+  an SSH deploy key.
+- **Frontend** — vanilla HTML/CSS/JS (`frontend/`) served via GitHub
+  Pages from the `data` branch. No backend API: the dashboard reads
+  the JSON files directly.
+
+### Exported JSON files
+
+| File | Contents |
+|------|---|
+| `summary.json` | Network-level aggregates, drift bands, foundation count |
+| `validators.json` | Per-validator drift summary |
+| `history.json` | 7 days × 5-minute buckets of network drift |
+| `meta.json` | Daemon version + observation totals |
+| `best_validators.json` | Top 10 lowest pipeline latency |
+| `pipeline_anomalies.json` | **v1.0.0** Tier 1: 500 ms ≤ \|lag\| < 5 s |
+| `clock_drift.json` | **v1.0.0** Tier 2: \|drift\| ≥ 5 s — Layer 2 |
+| `worst_validators.json` | Legacy combined ranking — DEPRECATED in v1.0.0, removal scheduled v1.1.0 |
+| `foundation.json` | 12-node X1 Labs cluster snapshot |
+| `foundation_drift_trend.json` | 14 days × 1-hour buckets of foundation cluster pipeline trend |
+| `chrony.json` | Sentinel chrony tracking + NTP source state |
 
 ## Repository layout
 
@@ -47,9 +69,10 @@ for every (validator, slot) pair we can match.
 .
 ├── daemon/                Rust daemon (binary x1cd)
 ├── frontend/              Vanilla HTML + JS dashboard
+│   └── docs/
+│       └── methodology.html  Layer 1/2 framework & measurement docs
 ├── install/               Install scripts and systemd unit
-├── docs/                  Methodology
-└── .github/workflows/     CI + Pages deploy
+└── .github/workflows/     CI + release workflows
 ```
 
 ## Building from source
@@ -71,9 +94,10 @@ The HTTP API and dashboard are served on `127.0.0.1:8088` (configurable).
 The daemon will refuse to start if the configured kill-switch file
 exists.
 
-## Installing on a validator
+## Self-hosting (validator operators)
 
-See [install/install.sh](install/install.sh). Summary:
+Operators who want their own instance can install via the bundled
+script:
 
 ```bash
 sudo -u x1pio bash install/install.sh
@@ -81,17 +105,45 @@ sudo systemctl start x1cd
 journalctl -u x1cd -f
 ```
 
-The installer generates an SSH deploy key, asks the operator to register
-it on GitHub with write access, clones the `data` branch, writes
-`config.toml`, and installs the systemd unit.
+The installer downloads the latest release tarball, verifies its
+SHA256, drops the binary into `/home/x1pio/strontium-meter/bin/`,
+generates an SSH deploy key (operator registers it on GitHub with
+write access), clones the `data` branch, writes `config.toml`, and
+installs the systemd unit.
+
+Requirements:
+- Linux x86_64 with glibc 2.35+ (Ubuntu 22.04 baseline)
+- chrony installed and synchronized to stratum-1 sources
+- Solana RPC access to X1 mainnet
+- Optional: SSH deploy key for pushing to your own GitHub Pages branch
+
+Releases: <https://github.com/PioWin-clo/X1-ClockDrift/releases/latest>
 
 ## Operational guarantees
 
 - `CPUQuota=20%`, `MemoryMax=512M`, `Nice=19`, `IOSchedulingClass=idle`:
   the validator always has priority.
-- `Type=notify` + `WatchdogSec=120`: systemd kills the daemon if it stops
-  pinging.
+- `Type=notify` + `WatchdogSec=120`: systemd kills the daemon if it
+  stops pinging.
 - `touch /home/x1pio/strontium-meter/STOP` causes a clean exit within 5 s.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).
+
+## Acknowledgments
+
+- The X1 Labs team, particularly Theo, for clarifying the Layer 1 vs
+  Layer 2 framework that informs this dashboard's interpretation
+  (personal communication, X1 Labs Telegram).
+- Solana Labs for the underlying consensus mechanics.
+- The chrony project for the precision time synchronization that
+  makes reliable measurement possible.
+
+## Contact
+
+GitHub issues for bugs and feature requests. Architecture questions
+welcome.
 
 ## Status
 

@@ -30,50 +30,48 @@
 
 <main class="container">
 
-  <!-- ===== HERO #1: X1 network time right now ===== -->
-  <section class="hero1-section">
-    <div class="section-title" data-i18n="hero1_title">X1 network time right now</div>
-    <div class="hero1-times">
-      <div class="hero1-time">
-        <div class="hero1-time-label" data-i18n="hero1_chain_time">X1 chain consensus</div>
-        <div class="hero1-time-value mono" id="hero1-chain-time">—</div>
-      </div>
-      <div class="hero1-time">
-        <div class="hero1-time-label" data-i18n="hero1_real_utc">Real UTC</div>
-        <div class="hero1-time-value mono" id="hero1-real-utc">—</div>
-      </div>
+  <!-- ===== HERO #1: vote pipeline latency vs UTC (v1.0.0) ===== -->
+  <section class="hero hero-pipeline">
+    <h1 class="section-title" data-i18n="hero1_title">X1 vote pipeline latency vs UTC</h1>
+    <p class="hero-subtitle" data-i18n="hero1_subtitle">Time from vote creation to on-chain visibility</p>
+    <div class="hero-figure">
+      <span id="pipeline-current-lag" class="mono">—</span>
     </div>
-    <div class="hero1-drift" id="hero1-drift">—</div>
-    <div class="hero1-trend mono" id="hero1-trend">—</div>
+    <div class="hero-trend mono" id="hero1-trend">—</div>
+    <p class="hero-explanation" data-i18n="hero1_explanation">
+      Solana/Tachyon vote pipeline takes ~400-850 ms inherently (signing + gossip + block inclusion). Values in this range are normal — Layer 1 baseline, not clock drift. See methodology.
+    </p>
+    <a href="docs/methodology.html" class="hero-link" data-i18n="methodology_link">methodology</a>
   </section>
 
-  <!-- ===== HERO #2: validator clock health ===== -->
-  <section class="hero2-section">
-    <div class="section-title" data-i18n="hero2_title">Validator clock health</div>
+  <!-- ===== HERO #2: validator pipeline health (v1.0.0 — Layer 1/2 bands) ===== -->
+  <section class="hero hero-health">
+    <h2 class="section-title" data-i18n="hero2_title">Validator pipeline health</h2>
+    <p class="hero-subtitle" data-i18n="hero2_subtitle">Distribution by deviation from foundation baseline</p>
     <div class="health-cards">
-      <div class="health-card severity-critical">
-        <div class="health-icon">🚨</div>
-        <div class="health-label" data-i18n="health_critical">Critical</div>
-        <div class="health-value mono" id="n-critical">—</div>
-        <div class="health-sub" data-i18n="health_critical_sub">&gt;5s</div>
-      </div>
-      <div class="health-card severity-high">
-        <div class="health-icon">⚠️</div>
-        <div class="health-label" data-i18n="health_high">High</div>
-        <div class="health-value mono" id="n-high">—</div>
-        <div class="health-sub" data-i18n="health_high_sub">1-5s</div>
-      </div>
-      <div class="health-card severity-healthy">
+      <div class="health-card health-normal">
         <div class="health-icon">✅</div>
-        <div class="health-label" data-i18n="health_healthy">Healthy</div>
-        <div class="health-value mono" id="n-healthy">—</div>
-        <div class="health-sub" data-i18n="health_healthy_sub">&lt;1s</div>
+        <div class="health-label" data-i18n="health_normal_label">Normal pipeline</div>
+        <div class="health-value mono" id="health-normal-count">—</div>
+        <div class="health-sub" data-i18n="health_normal_desc">|deviation| &lt; 500 ms</div>
       </div>
-      <div class="health-card severity-foundation">
+      <div class="health-card health-slow">
+        <div class="health-icon">⚠️</div>
+        <div class="health-label" data-i18n="health_slow_label">Slow pipeline</div>
+        <div class="health-value mono" id="health-slow-count">—</div>
+        <div class="health-sub" data-i18n="health_slow_desc">500 ms – 5 s</div>
+      </div>
+      <div class="health-card health-drift">
+        <div class="health-icon">🔴</div>
+        <div class="health-label" data-i18n="health_drift_label">Clock drift</div>
+        <div class="health-value mono" id="health-drift-count">—</div>
+        <div class="health-sub" data-i18n="health_drift_desc">|drift| ≥ 5 s — Layer 2</div>
+      </div>
+      <div class="health-card health-foundation">
         <div class="health-icon">🏛️</div>
-        <div class="health-label" data-i18n="health_foundation">X1 Labs</div>
-        <div class="health-value mono" id="n-foundation">—</div>
-        <div class="health-sub" data-i18n="health_foundation_sub">separate</div>
+        <div class="health-label" data-i18n="health_foundation_label">X1 Labs</div>
+        <div class="health-value mono" id="health-foundation-count">—</div>
+        <div class="health-sub" data-i18n="health_foundation_desc">baseline reference</div>
       </div>
     </div>
   </section>
@@ -110,9 +108,10 @@
     </div>
   </section>
 
-  <!-- ===== Network drift over time ===== -->
+  <!-- ===== Vote pipeline latency over time (v1.0.0 framing) ===== -->
   <section class="chart-block">
-    <div class="chart-title" data-i18n="chart_history_title">Network drift over time (5-minute buckets)</div>
+    <div class="chart-title" data-i18n="chart_history_title">Vote pipeline latency over time (5-minute buckets)</div>
+    <p class="section-help" data-i18n="chart_history_help">Aggregate vote-to-block latency across all voting validators. Stable ~-800 ms = healthy Tachyon protocol. Sudden swings = network stress, deployments, or load events.</p>
     <div class="chart-controls">
       <div class="window-selector" role="group" aria-label="Window">
         <button type="button" class="window-btn" data-window-days="2" data-i18n="network_window_2d">2d</button>
@@ -135,17 +134,17 @@
     </div>
   </section>
 
-  <!-- ===== v0.5.0: Foundation drift trend (14d/1h) ===== -->
+  <!-- ===== Foundation pipeline trend (14d/1h) — v1.0.0 framing ===== -->
   <section class="foundation-trend-section" id="foundation-trend-section">
-    <div class="section-title" data-i18n="foundation_trend_title">X1 Labs foundation drift trend (14 days)</div>
-    <div class="section-help" data-i18n="foundation_trend_help">Tracks the 12-node X1 Labs foundation cluster drift over time. Sudden shifts (&gt;100 ms in one bucket) indicate X1 Labs changed Tachyon configuration, NTP source, or deployed an update.</div>
+    <div class="section-title" data-i18n="foundation_trend_title">X1 Labs foundation pipeline trend (14 days)</div>
+    <div class="section-help" data-i18n="foundation_trend_help">Tracks pipeline latency for the 12-node X1 Labs foundation cluster. Shifts >100 ms in one bucket indicate X1 Labs changed something operationally — Tachyon config, NTP source, deployment, or load test. NOT clock drift (foundation clocks are tightly synchronized — identical signature across nodes proves this).</div>
     <div class="foundation-trend-stats">
       <div class="stat-card">
-        <span class="stat-label" data-i18n="foundation_current_drift">Current avg drift</span>
+        <span class="stat-label" data-i18n="foundation_current_lag">Current avg lag</span>
         <span class="stat-value mono" id="foundation-current-drift">—</span>
       </div>
       <div class="stat-card">
-        <span class="stat-label" data-i18n="foundation_drift_change_7d">Change vs 7d ago</span>
+        <span class="stat-label" data-i18n="foundation_lag_change_7d">Change vs 7d ago</span>
         <span class="stat-value mono" id="foundation-drift-change-7d">—</span>
       </div>
       <div class="stat-card">
@@ -153,7 +152,7 @@
         <span class="stat-value mono" id="foundation-active-nodes">—</span>
       </div>
       <div class="stat-card stat-alert" id="foundation-alert-card" hidden>
-        <span class="stat-label" data-i18n="foundation_alert_label">⚠️ Recent change detected</span>
+        <span class="stat-label" data-i18n="foundation_alert_label">⚠️ Operational change detected</span>
         <span class="stat-value mono" id="foundation-alert-value">—</span>
       </div>
     </div>
@@ -162,57 +161,90 @@
     </div>
   </section>
 
-  <!-- ===== TOP WORST VALIDATORS ===== -->
-  <section class="worst-block">
-    <div class="ranking-head">
-      <div>
-        <div class="ranking-title" data-i18n="worst_table_title">Top worst validators</div>
-        <div class="section-help" data-i18n="worst_top_subtitle">Validators with drift ≥500 ms · ≥20 samples · any stake.</div>
+  <!-- ===== ANOMALIES & DEVIATIONS — split into Tier 1 + Tier 2 (v1.0.0) ===== -->
+  <section class="anomalies-section">
+    <h2 class="section-title" data-i18n="worst_section_title">Anomalies &amp; deviations</h2>
+
+    <!-- Tier 1: pipeline anomalies — slow but not clock drift -->
+    <div class="anomaly-tier tier-pipeline">
+      <div class="ranking-head">
+        <div>
+          <h3 class="tier-title" data-i18n="worst_tier1_title">Pipeline anomalies</h3>
+          <div class="tier-subtitle" data-i18n="worst_tier1_subtitle">500 ms ≤ |lag| &lt; 5 s · ≥20 samples</div>
+          <p class="tier-help" data-i18n="worst_tier1_help">Validators with elevated pipeline latency. Causes: slow network, CPU saturation, geographic distance from leaders, suboptimal Tachyon config. Not a chain-time threat — but operator should investigate infra.</p>
+        </div>
+        <div class="ranking-controls">
+          <select id="severity-filter" class="severity-filter">
+            <option value="all" data-i18n="filter_all">All</option>
+            <option value="critical" data-i18n="filter_critical">Critical only</option>
+            <option value="high" data-i18n="filter_high">High and worse</option>
+          </select>
+          <input class="search" id="search" type="search" data-i18n-attr-placeholder="ranking_search_placeholder" autocomplete="off">
+        </div>
       </div>
-      <div class="ranking-controls">
-        <select id="severity-filter" class="severity-filter">
-          <option value="all" data-i18n="filter_all">All</option>
-          <option value="critical" data-i18n="filter_critical">Critical only</option>
-          <option value="high" data-i18n="filter_high">High and worse</option>
-        </select>
-        <input class="search" id="search" type="search" data-i18n-attr-placeholder="ranking_search_placeholder" autocomplete="off">
+      <div class="table-filters">
+        <label class="stake-filter">
+          <span data-i18n="stake_filter_label">Min stake (XNT, optional)</span>
+          <input type="number" id="worst-min-stake" min="0" step="1" placeholder="0">
+        </label>
+        <span class="filter-hint" data-i18n="stake_filter_hint">Client-side lens. Server keeps all stake levels.</span>
+      </div>
+      <div class="table-wrap">
+        <table class="worst-table">
+          <thead>
+            <tr>
+              <th data-i18n="col_rank">#</th>
+              <th data-sort="severity" data-i18n="col_severity">tag</th>
+              <th data-sort="pubkey" data-i18n="col_pubkey">pubkey</th>
+              <th data-sort="mean_drift_ms_abs" class="num" data-i18n="col_drift">lag (ms)</th>
+              <th data-sort="stddev_drift_ms" class="num" data-i18n="col_jitter">jitter (ms)</th>
+              <th data-sort="n_samples" class="num" data-i18n="col_n">n</th>
+              <th data-sort="stake_xnt" class="num" data-i18n="col_stake">stake (XNT)</th>
+            </tr>
+          </thead>
+          <tbody id="worst-body"></tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <button id="prev" type="button" data-i18n="prev_page">prev</button>
+        <span id="page-info">page 1</span>
+        <button id="next" type="button" data-i18n="next_page">next</button>
       </div>
     </div>
-    <div class="table-filters">
-      <label class="stake-filter">
-        <span data-i18n="stake_filter_label">Min stake (XNT, optional)</span>
-        <input type="number" id="worst-min-stake" min="0" step="1" placeholder="0">
-      </label>
-      <span class="filter-hint" data-i18n="stake_filter_hint">Client-side lens. Server keeps all stake levels.</span>
-    </div>
-    <div class="table-wrap">
-      <table class="worst-table">
-        <thead>
-          <tr>
-            <th data-i18n="col_rank">#</th>
-            <th data-sort="severity" data-i18n="col_severity">tag</th>
-            <th data-sort="pubkey" data-i18n="col_pubkey">pubkey</th>
-            <th data-sort="mean_drift_ms_abs" class="num" data-i18n="col_drift">drift (ms)</th>
-            <th data-sort="stddev_drift_ms" class="num" data-i18n="col_jitter">jitter (ms)</th>
-            <th data-sort="n_samples" class="num" data-i18n="col_n">n</th>
-            <th data-sort="stake_xnt" class="num" data-i18n="col_stake">stake (XNT)</th>
-          </tr>
-        </thead>
-        <tbody id="worst-body"></tbody>
-      </table>
-    </div>
-    <div class="pagination">
-      <button id="prev" type="button" data-i18n="prev_page">prev</button>
-      <span id="page-info">page 1</span>
-      <button id="next" type="button" data-i18n="next_page">next</button>
+
+    <!-- Tier 2: real Layer 2 clock drift — operator must fix NTP/chrony -->
+    <div class="anomaly-tier tier-drift">
+      <h3 class="tier-title">
+        <span class="tier-icon" aria-hidden="true">🔴</span>
+        <span data-i18n="worst_tier2_title">Clock drift (Layer 2)</span>
+      </h3>
+      <div class="tier-subtitle" data-i18n="worst_tier2_subtitle">|drift| ≥ 5 s · ≥20 samples · genuine clock misconfiguration</div>
+      <p class="tier-help" data-i18n="worst_tier2_help">Validators whose Clock::unix_timestamp deviates from real UTC by 5+ seconds. This IS clock drift — operator needs to fix chrony/NTP. Strontium oracle corrects this at protocol level for chain consumers.</p>
+      <div class="table-wrap">
+        <table class="clock-drift-table">
+          <thead>
+            <tr>
+              <th data-i18n="col_rank">#</th>
+              <th data-i18n="col_pubkey">pubkey</th>
+              <th class="num" data-i18n="col_drift">drift (ms)</th>
+              <th class="num" data-i18n="col_jitter">jitter (ms)</th>
+              <th class="num" data-i18n="col_n">n</th>
+              <th class="num" data-i18n="col_stake">stake (XNT)</th>
+            </tr>
+          </thead>
+          <tbody id="clock-drift-body"></tbody>
+        </table>
+      </div>
+      <p class="tier-empty" id="clock-drift-empty" hidden>No Layer 2 drift detected in this window.</p>
     </div>
   </section>
 
   <!-- ===== TOP 10 BEST SYNCED ===== -->
   <section class="best-synced-section">
     <div class="best-synced-header">
-      <div class="section-title" data-i18n="best_synced_title">Best synchronized validators (top 10)</div>
-      <div class="section-help" data-i18n="best_top_subtitle">≥100 samples · |drift| &lt; 5 s · foundation excluded · any stake.</div>
+      <div class="section-title" data-i18n="best_top_title">Top pipeline efficient validators (top 10)</div>
+      <div class="section-help" data-i18n="best_top_subtitle">≥100 samples · |lag| &lt; 5 s · foundation excluded · sorted by ABS(lag) ascending.</div>
+      <p class="tier-help" data-i18n="best_top_help">Lowest pipeline latency means fastest vote→block round-trip. NOT necessarily the best clock — pipeline depends on network position, leader proximity, and Tachyon configuration. Foundation excluded since its baseline is the protocol baseline.</p>
     </div>
     <div class="table-filters">
       <label class="stake-filter">
@@ -227,7 +259,7 @@
           <tr>
             <th data-i18n="col_rank">#</th>
             <th data-i18n="col_pubkey">pubkey</th>
-            <th class="num" data-i18n="col_drift">drift (ms)</th>
+            <th class="num" data-i18n="col_drift">lag (ms)</th>
             <th class="num" data-i18n="col_jitter">jitter (ms)</th>
             <th class="num" data-i18n="col_n">n</th>
             <th class="num" data-i18n="col_stake">stake (XNT)</th>
@@ -333,11 +365,30 @@
     </div>
   </section>
 
+  <!-- ===== Layer 1 / Layer 2 explainer (v1.0.0) ===== -->
+  <section class="layer-explainer">
+    <h2 class="section-title" data-i18n="layer_explainer_title">How to read this dashboard</h2>
+    <div class="layer-grid">
+      <div class="layer-card layer-card-1">
+        <h3 data-i18n="layer1_title">Layer 1 — Pipeline latency</h3>
+        <p data-i18n="layer1_explanation">~400-850 ms inherent in Tachyon protocol. Sum of signing + gossip + block inclusion times. Identical across well-synchronized validators.</p>
+      </div>
+      <div class="layer-card layer-card-2">
+        <h3 data-i18n="layer2_title">Layer 2 — Clock drift</h3>
+        <p data-i18n="layer2_explanation">Validator system time vs real UTC. |drift| &gt; 5 s indicates NTP/chrony misconfiguration. This is what Strontium oracle corrects.</p>
+      </div>
+    </div>
+    <p class="explainer-cta">
+      <span data-i18n="methodology_cta">Full details:</span>
+      <a href="docs/methodology.html" data-i18n="methodology_link">methodology</a>
+    </p>
+  </section>
+
   <footer class="footer">
     <div>
       <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener" data-i18n="footer_repo">github</a>
       &nbsp;·&nbsp;
-      <a href="https://github.com/PioWin-clo/X1-ClockDrift/blob/main/docs/methodology.md" target="_blank" rel="noreferrer noopener" data-i18n="footer_methodology">methodology</a>
+      <a href="docs/methodology.html" data-i18n="footer_methodology">methodology</a>
     </div>
     <div id="meta-line">—</div>
   </footer>

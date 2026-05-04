@@ -1192,19 +1192,107 @@ pub async fn backfill_history(pool: &Pool, lookback_secs: i64) -> Result<usize> 
     Ok(count)
 }
 
-/// "Top worst" ranking: validators causing real operational concern.
-/// Filters are STATISTICAL/DEFINITIONAL only — no stake-based business
-/// logic:
-///   * `min_samples >= 20` — statistical significance (less strict than
-///     best synced because operationally we want early signal on real
-///     problems even before 100 samples)
-///   * `ABS(mean_drift_ms) >= min_abs_drift` — definition of "worst"
-///     requires meaningful drift; near-baseline isn't worth flagging
+/// v1.0.0 Layer 1/Layer 2 framework — see methodology.html for context.
 ///
-/// v0.6.0 removed the `min_stake_lamports >= 100 XNT` filter. A 2-XNT
-/// validator with -23s drift is operationally newsworthy: catastrophic
-/// operator misconfig is signal regardless of stake. Frontend offers
-/// an optional client-side stake filter for users who want that lens.
+/// Tier 1: pipeline anomalies — slow vote pipeline, NOT clock drift.
+///   * `500 <= |mean_drift_ms| < 5000` — elevated latency but bounded;
+///     causes are network position, CPU saturation, geographic distance
+///     from leaders, suboptimal Tachyon config. Operator should
+///     investigate infra; not a chain-time threat.
+///   * `n_samples >= 20` — same statistical floor as the legacy worst
+///     ranking; we want early signal on infra issues.
+pub async fn get_pipeline_anomalies(
+    pool: &Pool,
+    limit: i64,
+) -> Result<Vec<ValidatorSummary>> {
+    let rows = sqlx::query(
+        "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                cluster_id, cluster_size, is_multi_node, \
+                is_foundation, foundation_label, severity \
+         FROM validator_drift_summary \
+         WHERE n_samples >= 20 \
+           AND ABS(mean_drift_ms) >= 500 \
+           AND ABS(mean_drift_ms) < 5000 \
+         ORDER BY ABS(mean_drift_ms) DESC \
+         LIMIT ?1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows_to_summaries(rows))
+}
+
+/// v1.0.0 Layer 1/Layer 2 framework — see methodology.html for context.
+///
+/// Tier 2: Layer 2 clock drift — genuine NTP/chrony misconfiguration.
+///   * `|mean_drift_ms| >= 5000` — pipeline contribution is bounded
+///     ~400-850 ms; anything past 5 s reflects validator system clock
+///     deviating from real UTC, not protocol latency.
+///   * `n_samples >= 20` — same floor as Tier 1.
+///
+/// This is the regime Strontium oracle corrects for chain consumers.
+pub async fn get_clock_drift_validators(
+    pool: &Pool,
+    limit: i64,
+) -> Result<Vec<ValidatorSummary>> {
+    let rows = sqlx::query(
+        "SELECT validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                cluster_id, cluster_size, is_multi_node, \
+                is_foundation, foundation_label, severity \
+         FROM validator_drift_summary \
+         WHERE n_samples >= 20 \
+           AND ABS(mean_drift_ms) >= 5000 \
+         ORDER BY ABS(mean_drift_ms) DESC \
+         LIMIT ?1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows_to_summaries(rows))
+}
+
+/// Shared row->ValidatorSummary mapping for the worst-tier queries.
+/// Identical column list across get_pipeline_anomalies and
+/// get_clock_drift_validators (and the legacy get_worst_validators); kept
+/// as a free function rather than copy-pasted three times.
+fn rows_to_summaries(rows: Vec<sqlx::sqlite::SqliteRow>) -> Vec<ValidatorSummary> {
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        out.push(ValidatorSummary {
+            validator: r.try_get("validator").unwrap_or_default(),
+            n_samples: r.try_get("n_samples").unwrap_or(0),
+            mean_drift_ms: r.try_get("mean_drift_ms").unwrap_or(0.0),
+            median_drift_ms: r.try_get("median_drift_ms").unwrap_or(0.0),
+            stddev_drift_ms: r.try_get("stddev_drift_ms").unwrap_or(0.0),
+            p10_drift_ms: r.try_get("p10_drift_ms").unwrap_or(0.0),
+            p90_drift_ms: r.try_get("p90_drift_ms").unwrap_or(0.0),
+            last_seen_slot: r.try_get("last_seen_slot").unwrap_or(0),
+            last_stake_lamports: r.try_get("last_stake_lamports").unwrap_or(0),
+            updated_at: r.try_get("updated_at").unwrap_or(0),
+            cluster_id: r.try_get::<Option<i64>, _>("cluster_id").unwrap_or(None),
+            cluster_size: r.try_get("cluster_size").unwrap_or(1),
+            is_multi_node: r.try_get::<i64, _>("is_multi_node").unwrap_or(0) != 0,
+            is_foundation: r.try_get::<i64, _>("is_foundation").unwrap_or(0) != 0,
+            foundation_label: r.try_get::<Option<String>, _>("foundation_label").unwrap_or(None),
+            severity: r.try_get::<Option<String>, _>("severity").unwrap_or(None),
+        });
+    }
+    out
+}
+
+/// Legacy combined "top worst" ranking — kept for one release so external
+/// consumers fetching `worst_validators.json` don't 404. Use
+/// [`get_pipeline_anomalies`] (Tier 1, slow pipeline) and
+/// [`get_clock_drift_validators`] (Tier 2, real Layer 2 drift) instead.
+///
+/// Scheduled for removal in v1.1.0 (release notes track this).
+#[deprecated(
+    since = "1.0.0",
+    note = "Split into get_pipeline_anomalies (Tier 1) + get_clock_drift_validators (Tier 2). \
+            Scheduled for removal in v1.1.0."
+)]
 pub async fn get_worst_validators(
     pool: &Pool,
     limit: i64,
@@ -1227,29 +1315,7 @@ pub async fn get_worst_validators(
     .bind(limit)
     .fetch_all(pool)
     .await?;
-
-    let mut out = Vec::with_capacity(rows.len());
-    for r in rows {
-        out.push(ValidatorSummary {
-            validator: r.try_get("validator")?,
-            n_samples: r.try_get("n_samples")?,
-            mean_drift_ms: r.try_get("mean_drift_ms")?,
-            median_drift_ms: r.try_get("median_drift_ms")?,
-            stddev_drift_ms: r.try_get("stddev_drift_ms")?,
-            p10_drift_ms: r.try_get("p10_drift_ms")?,
-            p90_drift_ms: r.try_get("p90_drift_ms")?,
-            last_seen_slot: r.try_get("last_seen_slot")?,
-            last_stake_lamports: r.try_get("last_stake_lamports")?,
-            updated_at: r.try_get("updated_at")?,
-            cluster_id: r.try_get::<Option<i64>, _>("cluster_id").unwrap_or(None),
-            cluster_size: r.try_get("cluster_size").unwrap_or(1),
-            is_multi_node: r.try_get::<i64, _>("is_multi_node").unwrap_or(0) != 0,
-            is_foundation: r.try_get::<i64, _>("is_foundation").unwrap_or(0) != 0,
-            foundation_label: r.try_get::<Option<String>, _>("foundation_label").unwrap_or(None),
-            severity: r.try_get::<Option<String>, _>("severity").unwrap_or(None),
-        });
-    }
-    Ok(out)
+    Ok(rows_to_summaries(rows))
 }
 
 /// One time-bucketed slice of foundation cluster drift over time.
@@ -2255,6 +2321,11 @@ mod tests {
     /// A 2-XNT validator with -23s drift is operationally newsworthy
     /// regardless of stake — catastrophic operator misconfig is signal.
     /// Filters retained: n_samples ≥ 20, |drift| ≥ 500 ms.
+    ///
+    /// v1.0.0: this exercises the legacy combined query (deprecated;
+    /// removal scheduled for v1.1.0). The two new tier-specific tests
+    /// below cover the active code paths.
+    #[allow(deprecated)]
     #[tokio::test]
     async fn test_worst_validators_includes_low_stake_with_bad_clock() {
         let pool = init(":memory:").await.unwrap();
@@ -2313,6 +2384,129 @@ mod tests {
         assert_eq!(results[1].mean_drift_ms.abs() as i64, 23_000);
         // Third is real_outlier_b (11000)
         assert_eq!(results[2].validator, "real_outlier_b");
+    }
+
+    /// v1.0.0 Tier 1: pipeline anomalies — slow vote pipeline, NOT clock
+    /// drift. Must include 500 ≤ |lag| < 5000 ms entries; must EXCLUDE
+    /// |drift| ≥ 5000 ms (those go to Tier 2).
+    #[tokio::test]
+    async fn test_pipeline_anomalies_excludes_clock_drift_outliers() {
+        let pool = init(":memory:").await.unwrap();
+        let now = chrono::Utc::now().timestamp();
+
+        // (validator, n_samples, mean_drift_ms, stake_lamports)
+        let rows = [
+            // Accepted Tier 1: -2s lag (slow pipeline / network / CPU)
+            ("slow_network", 100i64, -2000.0, 50_000_000_000i64),
+            // Rejected from Tier 1: -23s — Layer 2, belongs to Tier 2
+            ("clock_drift_op", 100, -23_000.0, 100_000_000_000_000),
+            // Rejected: |drift|=300 < 500 (healthy / normal pipeline)
+            ("healthy", 100, -300.0, 50_000_000_000_000),
+            // Rejected: n=10 < 20 (statistical noise)
+            ("noisy_low_n", 10, -2000.0, 1_000_000_000),
+            // Accepted Tier 1: +1.2s
+            ("moderate_slow", 50, 1_200.0, 30_000_000_000_000),
+            // Boundary: |drift|=4999.9 just under 5000 → Tier 1
+            ("boundary_high", 50, 4_999.9, 1_000_000_000),
+            // Boundary: |drift|=5000.0 → Tier 2 (excluded from Tier 1)
+            ("boundary_layer2", 50, 5_000.0, 1_000_000_000),
+        ];
+        for (v, n, mean, stake) in rows.iter() {
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
+                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5)",
+            )
+            .bind(*v)
+            .bind(*n)
+            .bind(*mean)
+            .bind(*stake)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let results = get_pipeline_anomalies(&pool, 30).await.unwrap();
+        let pubkeys: Vec<&str> = results.iter().map(|v| v.validator.as_str()).collect();
+
+        assert_eq!(
+            results.len(),
+            3,
+            "expected 3 (slow_network + moderate_slow + boundary_high); \
+             clock_drift_op (Tier 2) + healthy + noisy_low_n + boundary_layer2 filtered"
+        );
+        assert!(pubkeys.contains(&"slow_network"));
+        assert!(pubkeys.contains(&"moderate_slow"));
+        assert!(pubkeys.contains(&"boundary_high"));
+        assert!(!pubkeys.contains(&"clock_drift_op"));
+        assert!(!pubkeys.contains(&"boundary_layer2"));
+        // Sorted by ABS(drift) DESC: 4999.9, 2000, 1200.
+        assert_eq!(results[0].validator, "boundary_high");
+        assert_eq!(results[1].validator, "slow_network");
+        assert_eq!(results[2].validator, "moderate_slow");
+    }
+
+    /// v1.0.0 Tier 2: Layer 2 clock drift — only |drift| ≥ 5000 ms.
+    /// Pipeline-anomaly entries (500 ≤ |lag| < 5000) must NOT appear.
+    #[tokio::test]
+    async fn test_clock_drift_validators_only_layer2() {
+        let pool = init(":memory:").await.unwrap();
+        let now = chrono::Utc::now().timestamp();
+
+        // (validator, n_samples, mean_drift_ms, stake_lamports)
+        let rows = [
+            // Rejected: -2s is Tier 1, not Tier 2
+            ("slow_pipeline", 100i64, -2000.0, 50_000_000_000i64),
+            // Accepted: -23s real Layer 2 drift
+            ("real_drift", 100, -23_000.0, 100_000_000_000_000),
+            // Accepted: +11s real Layer 2 drift
+            ("real_drift_pos", 100, 11_000.0, 110_000_000_000_000),
+            // Rejected: |drift|=300 < 5000 — normal/healthy
+            ("healthy", 100, -300.0, 50_000_000_000_000),
+            // Rejected: n=10 < 20 (insufficient samples)
+            ("low_n_huge_drift", 10, -50_000.0, 1_000_000_000),
+            // Accepted: 2-XNT validator with catastrophic clock drift
+            ("tiny_stake_disaster", 100, -42_000.0, 2_000_000_000),
+            // Boundary: 5000.0 included in Tier 2.
+            ("boundary_layer2", 50, 5_000.0, 1_000_000_000),
+        ];
+        for (v, n, mean, stake) in rows.iter() {
+            sqlx::query(
+                "INSERT INTO validator_drift_summary \
+                 (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
+                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5)",
+            )
+            .bind(*v)
+            .bind(*n)
+            .bind(*mean)
+            .bind(*stake)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let results = get_clock_drift_validators(&pool, 30).await.unwrap();
+        let pubkeys: Vec<&str> = results.iter().map(|v| v.validator.as_str()).collect();
+
+        assert_eq!(
+            results.len(),
+            4,
+            "expected 4 (real_drift + real_drift_pos + tiny_stake_disaster + boundary_layer2); \
+             slow_pipeline + healthy + low_n_huge_drift filtered"
+        );
+        assert!(pubkeys.contains(&"real_drift"));
+        assert!(pubkeys.contains(&"real_drift_pos"));
+        assert!(pubkeys.contains(&"tiny_stake_disaster"));
+        assert!(pubkeys.contains(&"boundary_layer2"));
+        // Sorted by ABS(drift) DESC.
+        assert_eq!(results[0].validator, "tiny_stake_disaster"); // 42000
+        assert_eq!(results[1].validator, "real_drift");          // 23000
+        assert_eq!(results[2].validator, "real_drift_pos");      // 11000
+        assert_eq!(results[3].validator, "boundary_layer2");     // 5000
     }
 
     /// v0.5.0: foundation drift trend bucketing — verifies the JOIN
