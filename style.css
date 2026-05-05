@@ -420,6 +420,30 @@ td.mono { font-family: var(--mono); }
   font-size: 12px;
   font-family: var(--mono);
 }
+/* v1.3.0 — secondary detail under the largest-cluster value (its drift
+   band, e.g. "drift: -842.3 ms"); kept dim so the count + stake stay
+   the dominant signal. */
+.cluster-stat-detail {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+/* v1.3.0 — informational note explaining the 100-XNT noise floor and
+   how many groups got filtered out. Subtle so it doesn't compete with
+   the actual data. */
+.cluster-noise-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.cluster-noise-count {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+.cluster-noise-count:empty { display: none; }
 
 /* ===== Scatter section ===== */
 .scatter-section {

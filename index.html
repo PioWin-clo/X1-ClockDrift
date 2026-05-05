@@ -354,7 +354,8 @@
       </summary>
 
       <div class="chart-block">
-        <div class="chart-title" data-i18n="chart_histogram_title">Validator drift distribution (all tracked)</div>
+        <div class="chart-title" data-i18n="chart_histogram_title">Validator pipeline lag distribution (all tracked)</div>
+        <p class="section-help" data-i18n="histogram_subtitle">Most validators cluster in -800 to -400 ms range (Tachyon Layer 1 baseline). Bins outside this range indicate slow pipeline (amber) or genuine clock drift (red, Layer 2).</p>
         <div class="chart-frame">
           <canvas id="chart-histogram"></canvas>
         </div>
@@ -362,7 +363,7 @@
 
       <div class="chart-block">
         <div class="chart-title" data-i18n="scatter_title">Stake vs drift correlation</div>
-        <div class="section-help" data-i18n="scatter_help">Each point is a validator. X-axis = stake (log scale). Y-axis = mean drift (ms). Cluster members share colour. Click a point for details.</div>
+        <p class="section-help" data-i18n="scatter_subtitle">Each point = validator. Foundation nodes shown in blue. Validators with &lt; 0.01 XNT excluded as testnet noise. Layer 2 outliers (drift &lt; -5 s) clamped to chart edge.</p>
         <div class="chart-frame">
           <canvas id="chart-scatter"></canvas>
         </div>
@@ -376,23 +377,26 @@
       </div>
 
       <div class="clusters-section">
-        <div class="section-title" data-i18n="signature_groups_title">Drift signature groups</div>
-        <div class="section-help" data-i18n="signature_groups_help">Validators sharing identical drift values. May indicate shared infrastructure or coincidental NTP setup. Not necessarily 'farms'.</div>
+        <div class="section-title" data-i18n="cluster_section_title">Identical-drift clusters</div>
+        <p class="section-help" data-i18n="cluster_section_subtitle">Validators sharing identical drift values. May indicate shared infrastructure, common hosting provider, or coordinated NTP source. Filtered to clusters with ≥ 100 XNT total stake to exclude testnet noise.</p>
         <div class="clusters-row">
           <div class="cluster-stat">
-            <span class="cluster-label" data-i18n="clusters_detected">Detected groups</span>
+            <span class="cluster-label" data-i18n="cluster_count_label">Detected clusters</span>
             <span class="cluster-value" id="n-clusters">—</span>
           </div>
           <div class="cluster-stat">
-            <span class="cluster-label" data-i18n="cluster_validators">Validators in groups</span>
+            <span class="cluster-label" data-i18n="cluster_validators_label">Validators in clusters</span>
             <span class="cluster-value" id="n-clustered">—</span>
             <span class="cluster-pct" id="n-clustered-pct"></span>
           </div>
           <div class="cluster-stat">
-            <span class="cluster-label" data-i18n="largest_cluster">Largest group</span>
+            <span class="cluster-label" data-i18n="cluster_largest_label">Largest meaningful cluster</span>
             <span class="cluster-value" id="largest-cluster">—</span>
+            <span class="cluster-stat-detail" id="largest-cluster-drift"></span>
           </div>
         </div>
+        <p class="cluster-noise-note" data-i18n="cluster_noise_note">Clusters with &lt; 100 XNT total stake hidden as likely testnet noise.</p>
+        <p class="cluster-noise-count" id="cluster-noise-count"></p>
       </div>
     </details>
   </section>
