@@ -146,6 +146,23 @@ const I18N = {
     deeper_analytics: 'Deeper analytics',
     analytics_hint: 'distribution, correlation, signature groups',
 
+    // v1.3.0 — histogram around the Tachyon baseline
+    histogram_subtitle: 'Most validators cluster in -800 to -400 ms range (Tachyon Layer 1 baseline). Bins outside this range indicate slow pipeline (amber) or genuine clock drift (red, Layer 2).',
+
+    // v1.3.0 — drift clusters with operational floors
+    cluster_section_title: 'Identical-drift clusters',
+    cluster_section_subtitle: 'Validators sharing identical drift values. May indicate shared infrastructure, common hosting provider, or coordinated NTP source. Filtered to clusters with ≥ 100 XNT total stake to exclude testnet noise.',
+    cluster_count_label: 'Detected clusters',
+    cluster_validators_label: 'Validators in clusters',
+    cluster_largest_label: 'Largest meaningful cluster',
+    cluster_validators_word: 'validators',
+    cluster_none: 'No meaningful clusters detected',
+    cluster_noise_note: 'Clusters with < 100 XNT total stake hidden as likely testnet noise.',
+    cluster_noise_filtered_word: 'noise clusters filtered',
+
+    // legacy keys — retained for backward compat with any external
+    // consumers / older HTML snapshots; the v1.3.0 section uses the
+    // cluster_* keys above.
     signature_groups_title: 'Drift signature groups',
     signature_groups_help: 'Validators sharing identical drift values. May indicate shared infrastructure or coincidental NTP setup. Not necessarily "farms".',
     clusters_detected: 'Detected groups',
@@ -155,6 +172,12 @@ const I18N = {
     largest_cluster_value: (n, stake) => `${n} validators · ${stake} XNT`,
 
     scatter_title: 'Stake vs drift correlation',
+    // v1.3.0 — replaces legacy scatter_help; tighter framing now that
+    // the chart filters testnet noise and clamps Layer 2 outliers.
+    scatter_subtitle: 'Each point = validator. Foundation nodes shown in blue. Validators with < 0.01 XNT excluded as testnet noise. Layer 2 outliers (drift < -5 s) clamped to chart edge.',
+    scatter_legend: 'Validator',
+    scatter_x_axis_label: 'Stake (XNT, log scale, ≥ 0.01 XNT only)',
+    scatter_y_axis_label: 'Mean pipeline lag (ms)',
     scatter_help: 'Each point is a validator. X-axis = stake (log scale). Y-axis = mean drift (ms). Cluster members share colour. Click a point for details.',
     scatter_correlation: 'Correlation',
     scatter_slope: 'Slope',
@@ -334,6 +357,21 @@ const I18N = {
     deeper_analytics: 'Analityka szczegółowa',
     analytics_hint: 'rozkład, korelacja, grupy sygnatur',
 
+    // v1.3.0 — histogram wokół baseline’u Tachyon
+    histogram_subtitle: 'Większość walidatorów grupuje się w paśmie -800 do -400 ms (baseline Layer 1 Tachyon). Wartości poza tym pasmem oznaczają wolny pipeline (pomarańczowy) lub realny dryf zegara (czerwony, Layer 2).',
+
+    // v1.3.0 — klastry dryfu z progami operacyjnymi
+    cluster_section_title: 'Klastry identycznego dryfu',
+    cluster_section_subtitle: 'Walidatorzy o identycznych wartościach dryfu. Może oznaczać wspólną infrastrukturę, tego samego hosting providera, lub skoordynowane źródło NTP. Filtrowane do klastrów z ≥ 100 XNT łącznego stake aby wykluczyć szum testnet.',
+    cluster_count_label: 'Wykryte klastry',
+    cluster_validators_label: 'Walidatorzy w klastrach',
+    cluster_largest_label: 'Największy znaczący klaster',
+    cluster_validators_word: 'walidatorów',
+    cluster_none: 'Nie wykryto znaczących klastrów',
+    cluster_noise_note: 'Klastry z < 100 XNT łącznego stake ukryte jako prawdopodobny szum testnet.',
+    cluster_noise_filtered_word: 'klastrów szumu odfiltrowanych',
+
+    // legacy klucze — pozostawione dla zgodności z poprzednimi snapshotami
     signature_groups_title: 'Grupy identycznego dryfu',
     signature_groups_help: 'Walidatory dzielące identyczne wartości dryfu. Może oznaczać wspólną infrastrukturę lub przypadkowy zbieg NTP. Niekoniecznie „farmy".',
     clusters_detected: 'Wykryte grupy',
@@ -343,6 +381,12 @@ const I18N = {
     largest_cluster_value: (n, stake) => `${n} walidatorów · ${stake} XNT`,
 
     scatter_title: 'Korelacja stake vs dryf',
+    // v1.3.0 — zastępuje stare scatter_help po wprowadzeniu filtra
+    // testnet i przycięcia outlierów Layer 2.
+    scatter_subtitle: 'Każdy punkt = walidator. Nody fundacji niebieskie. Walidatory z < 0.01 XNT wykluczone jako szum testnet. Outlierzy Layer 2 (dryf < -5 s) przycięci do brzegu wykresu.',
+    scatter_legend: 'Walidator',
+    scatter_x_axis_label: 'Stake (XNT, skala log, tylko ≥ 0.01 XNT)',
+    scatter_y_axis_label: 'Średnie opóźnienie pipeline (ms)',
     scatter_help: 'Każdy punkt = walidator. Oś X = stake (skala log). Oś Y = średni dryf (ms). Walidatory w jednym klastrze mają ten sam kolor. Kliknij punkt po szczegóły.',
     scatter_correlation: 'Korelacja',
     scatter_slope: 'Nachylenie',
@@ -545,6 +589,10 @@ function bindElements() {
   el.nClustered = document.getElementById('n-clustered');
   el.nClusteredPct = document.getElementById('n-clustered-pct');
   el.largestCluster = document.getElementById('largest-cluster');
+  // v1.3.0 — drift band of the largest cluster + count of "noise"
+  // clusters filtered out by the 100-XNT total-stake floor.
+  el.largestClusterDrift = document.getElementById('largest-cluster-drift');
+  el.clusterNoiseCount = document.getElementById('cluster-noise-count');
   el.scatterR = document.getElementById('scatter-r');
   el.scatterSlope = document.getElementById('scatter-slope');
   el.modal = document.getElementById('validator-modal');
@@ -1365,37 +1413,66 @@ function renderFoundationTrend() {
 }
 
 let chartHistogram = null;
+// v1.3.0: histogram bins are no longer evenly spaced — they're chosen
+// around the actual X1 mainnet data distribution. Most validators sit
+// in -800..-400 ms (Tachyon Layer 1 baseline), with a long tail toward
+// 0 (better than baseline) and a thin sliver beyond ±5 s (Layer 2
+// drift). Old equal-width bins put the entire baseline population into
+// one or two giant bars and left every other bar empty.
+//
+// `cls` drives the per-bin colour so the chart visually agrees with
+// the dashboard's Layer 1/Layer 2 framework (red = drift, amber = slow
+// pipeline, blue = baseline range, green = fast/clean).
+const HISTOGRAM_BINS = [
+  { label: '< -2000',     min: -Infinity, max: -2000,    cls: 'bin-bad'      },
+  { label: '-2000…-1000', min: -2000,     max: -1000,    cls: 'bin-warn'     },
+  { label: '-1000…-800',  min: -1000,     max: -800,     cls: 'bin-baseline' },
+  { label: '-800…-600',   min: -800,      max: -600,     cls: 'bin-baseline' },
+  { label: '-600…-400',   min: -600,      max: -400,     cls: 'bin-baseline' },
+  { label: '-400…-200',   min: -400,      max: -200,     cls: 'bin-good'     },
+  { label: '-200…-50',    min: -200,      max: -50,      cls: 'bin-good'     },
+  { label: '-50…+50',     min: -50,       max: 50,       cls: 'bin-best'     },
+  { label: '+50…+500',    min: 50,        max: 500,      cls: 'bin-good'     },
+  { label: '+500…+5000',  min: 500,       max: 5000,     cls: 'bin-warn'     },
+  { label: '≥ +5000',     min: 5000,      max: Infinity, cls: 'bin-bad'      },
+];
+
+const HISTOGRAM_BIN_COLORS = {
+  'bin-bad':      'rgba(248, 81, 73, 0.78)',  // matches --bad
+  'bin-warn':     'rgba(210, 153, 34, 0.78)', // matches --warn
+  'bin-baseline': 'rgba(88, 166, 255, 0.78)', // matches --accent
+  'bin-good':     'rgba(63, 185, 80, 0.65)',  // matches --good lighter
+  'bin-best':     'rgba(63, 185, 80, 0.95)',  // matches --good full
+};
+
 function renderHistogram() {
   const ctx = document.getElementById('chart-histogram');
   if (!ctx || !window.Chart) return;
-  const buckets = buildHistogram(visibleValidators().map((v) => v.mean_drift_ms));
+  const values = visibleValidators()
+    .map((v) => v.mean_drift_ms)
+    .filter((v) => typeof v === 'number');
+  const counts = HISTOGRAM_BINS.map(
+    (bin) => values.filter((v) => v >= bin.min && v < bin.max).length,
+  );
+  const labels = HISTOGRAM_BINS.map((b) => b.label);
+  const backgroundColor = HISTOGRAM_BINS.map((b) => HISTOGRAM_BIN_COLORS[b.cls]);
+  const borderColor = backgroundColor.map((c) => c.replace(/[\d.]+\)$/, '1)'));
+
   if (chartHistogram) chartHistogram.destroy();
   chartHistogram = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: buckets.labels,
-      datasets: [{ label: 'validators', data: buckets.counts, backgroundColor: '#58a6ff' }],
+      labels,
+      datasets: [{
+        label: 'validators',
+        data: counts,
+        backgroundColor,
+        borderColor,
+        borderWidth: 1,
+      }],
     },
     options: chartCommonOpts({ yLabel: 'validators' }),
   });
-}
-
-function buildHistogram(values) {
-  if (values.length === 0) return { labels: [], counts: [] };
-  const edges = [-10000, -5000, -2000, -1000, -500, -200, -100, -50, -10, 10, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
-  const counts = new Array(edges.length + 1).fill(0);
-  for (const v of values) {
-    let placed = false;
-    for (let i = 0; i < edges.length; i++) {
-      if (v < edges[i]) { counts[i]++; placed = true; break; }
-    }
-    if (!placed) counts[edges.length]++;
-  }
-  const labels = [];
-  labels.push(`< ${edges[0]}`);
-  for (let i = 0; i < edges.length - 1; i++) labels.push(`${edges[i]}…${edges[i + 1]}`);
-  labels.push(`≥ ${edges[edges.length - 1]}`);
-  return { labels, counts };
 }
 
 function chartCommonOpts({ yLabel }) {
@@ -1413,42 +1490,111 @@ function chartCommonOpts({ yLabel }) {
   };
 }
 
+// v1.3.0: scatter axis fixes — log-spaced XNT ticks (was raw lamports
+// rendered with 25+ digits), testnet-noise filter (< 0.01 XNT), and
+// y-axis clamped so a single -23 s Layer 2 outlier doesn't squash the
+// rest of the population. Foundation nodes are explicitly tinted
+// accent-blue to make the "12-node cluster vs the rest" pattern
+// visually obvious; non-foundation gets a neutral gray fill.
+const SCATTER_MIN_XNT = 0.01;
+const SCATTER_X_TICKS = [0.01, 0.1, 1, 10, 100, 1000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000];
+const SCATTER_Y_MIN_MS = -5000;
+const SCATTER_Y_MAX_MS = 1000;
+
+// Format an XNT value for axis tick labels — short, K/M/B suffixes, no
+// scientific notation. The full-precision form is reserved for tooltips.
+function formatXntAxis(xnt) {
+  if (!isFinite(xnt) || xnt <= 0) return '';
+  if (xnt < 1) return xnt.toFixed(2) + ' XNT';
+  if (xnt < 1000) return xnt.toFixed(0) + ' XNT';
+  if (xnt < 1_000_000) return (xnt / 1000).toFixed(0) + 'k XNT';
+  if (xnt < 1_000_000_000) return (xnt / 1_000_000).toFixed(0) + 'M XNT';
+  return (xnt / 1_000_000_000).toFixed(1) + 'B XNT';
+}
+
+// More precise XNT formatter for tooltips (one tier finer than axis).
+function formatXntPrecise(xnt) {
+  if (!isFinite(xnt) || xnt < 0) return '—';
+  if (xnt < 1) return xnt.toFixed(3) + ' XNT';
+  if (xnt < 1000) return xnt.toFixed(1) + ' XNT';
+  if (xnt < 1_000_000) return (xnt / 1000).toFixed(1) + 'k XNT';
+  return (xnt / 1_000_000).toFixed(2) + 'M XNT';
+}
+
 let chartScatter = null;
 function renderScatter() {
   const ctx = document.getElementById('chart-scatter');
   if (!ctx || !window.Chart) return;
   const t = I18N[state.lang];
-  const visible = visibleValidators().filter((v) => v.stake_xnt > 0);
+
+  // Filter: testnet noise (< 0.01 XNT) + missing drift readings. The
+  // 0.01 XNT floor matches the histogram bin scale and the cluster
+  // detection threshold philosophy — we don't visualize zombie/test
+  // accounts that would otherwise dominate the low-stake corner.
+  const visible = visibleValidators().filter((v) =>
+    typeof v.mean_drift_ms === 'number' &&
+    typeof v.stake_xnt === 'number' &&
+    v.stake_xnt >= SCATTER_MIN_XNT,
+  );
   if (visible.length < 5) {
-    el.scatterR.textContent = t.scatter_no_data;
-    el.scatterSlope.textContent = '—';
+    if (el.scatterR) el.scatterR.textContent = t.scatter_no_data;
+    if (el.scatterSlope) el.scatterSlope.textContent = '—';
     if (chartScatter) { chartScatter.destroy(); chartScatter = null; }
     return;
   }
+
   const points = visible.map((v) => ({
-    x: v.stake_xnt, y: v.mean_drift_ms,
-    pubkey: v.pubkey, cluster: v.cluster_id, raw: v,
+    x: v.stake_xnt,
+    y: v.mean_drift_ms,
+    pubkey: v.pubkey,
+    is_foundation: !!v.is_foundation,
+    raw: v,
   }));
-  const colors = points.map((p) => p.cluster
-    ? CLUSTER_COLORS[(p.cluster - 1) % CLUSTER_COLORS.length]
-    : 'rgba(150,150,150,0.55)');
+  const backgroundColor = points.map((p) =>
+    p.is_foundation ? 'rgba(88, 166, 255, 0.65)' : 'rgba(170, 178, 191, 0.45)',
+  );
+  const borderColor = points.map((p) =>
+    p.is_foundation ? 'rgba(88, 166, 255, 1)' : 'rgba(170, 178, 191, 0.9)',
+  );
+
+  // Regression line preserved from v0.7.x — operators have asked for
+  // the slope ("ms per 10× stake") number historically, so we keep
+  // the .scatter-stats footer working. Fit on log10(stake_xnt) → drift.
   const reg = computeRegression(points);
-  el.scatterR.textContent = `r = ${reg.r.toFixed(3)}`;
-  el.scatterSlope.textContent = t.scatter_slope_value(reg.slope);
+  if (el.scatterR) el.scatterR.textContent = `r = ${reg.r.toFixed(3)}`;
+  if (el.scatterSlope) el.scatterSlope.textContent = t.scatter_slope_value(reg.slope);
   const xs = points.map((p) => p.x);
-  const xMin = Math.max(0.0001, Math.min(...xs));
+  const xMin = Math.max(SCATTER_MIN_XNT, Math.min(...xs));
   const xMax = Math.max(...xs);
   const lineData = [
     { x: xMin, y: reg.intercept + reg.slope * Math.log10(xMin) },
     { x: xMax, y: reg.intercept + reg.slope * Math.log10(xMax) },
   ];
+
   if (chartScatter) chartScatter.destroy();
   chartScatter = new Chart(ctx, {
     type: 'scatter',
     data: {
       datasets: [
-        { label: 'validators', data: points, backgroundColor: colors, pointRadius: 4 },
-        { type: 'line', label: 'trend', data: lineData, borderColor: '#f85149', borderWidth: 1.5, borderDash: [4, 4], pointRadius: 0, fill: false },
+        {
+          label: t.scatter_legend,
+          data: points,
+          backgroundColor,
+          borderColor,
+          borderWidth: 1,
+          pointRadius: 3.5,
+          pointHoverRadius: 5,
+        },
+        {
+          type: 'line',
+          label: 'trend',
+          data: lineData,
+          borderColor: 'rgba(248, 81, 73, 0.85)',
+          borderWidth: 1.5,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          fill: false,
+        },
       ],
     },
     options: {
@@ -1465,17 +1611,41 @@ function renderScatter() {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              if (ctx.datasetIndex !== 0) return null;
-              const p = ctx.raw;
-              return `${p.pubkey}: ${p.y.toFixed(1)} ms @ ${formatNum(p.x, 0)} XNT`;
+            label: (item) => {
+              if (item.datasetIndex !== 0) return null;
+              const p = item.raw;
+              const pk = (p.pubkey || '').slice(0, 8) + '…';
+              const stakeStr = formatXntPrecise(p.x);
+              const driftStr = `${p.y.toFixed(0)} ms`;
+              const flag = p.is_foundation ? '  🏛️' : '';
+              return `${pk}  ·  ${stakeStr}  ·  ${driftStr}${flag}`;
             },
           },
         },
       },
       scales: {
-        x: { type: 'logarithmic', ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, title: { display: true, text: 'Stake (XNT, log)', color: '#8b949e' } },
-        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, title: { display: true, text: 'Mean drift (ms)', color: '#8b949e' } },
+        x: {
+          type: 'logarithmic',
+          min: SCATTER_X_TICKS[0],
+          max: SCATTER_X_TICKS[SCATTER_X_TICKS.length - 1],
+          title: { display: true, text: t.scatter_x_axis_label, color: '#8b949e' },
+          ticks: {
+            color: '#8b949e',
+            autoSkip: false,
+            callback: (value) => formatXntAxis(value),
+          },
+          afterBuildTicks: (axis) => {
+            axis.ticks = SCATTER_X_TICKS.map((v) => ({ value: v }));
+          },
+          grid: { color: '#21262d' },
+        },
+        y: {
+          min: SCATTER_Y_MIN_MS,
+          max: SCATTER_Y_MAX_MS,
+          title: { display: true, text: t.scatter_y_axis_label, color: '#8b949e' },
+          ticks: { color: '#8b949e' },
+          grid: { color: '#21262d' },
+        },
       },
     },
   });
@@ -1498,24 +1668,97 @@ function computeRegression(points) {
   return { r, slope, intercept };
 }
 
-function renderClusters() {
-  if (!state.summary) return;
-  const t = I18N[state.lang];
-  const nClusters = state.summary.n_signature_groups ?? state.summary.n_clusters_detected ?? 0;
-  const nIn = state.summary.n_validators_in_groups ?? state.summary.n_validators_in_clusters ?? 0;
-  const nSing = state.summary.n_singletons ?? 0;
-  const total = nIn + nSing;
-  el.nClusters.textContent = formatInt(nClusters);
-  el.nClustered.textContent = formatInt(nIn);
-  el.nClusteredPct.textContent = total > 0 ? ` (${((100 * nIn) / total).toFixed(1)}%)` : '';
-  if (nClusters > 0) {
-    const stakeXnt = state.summary.largest_cluster_total_stake_xnt || 0;
-    el.largestCluster.textContent = t.largest_cluster_value(
-      formatInt(state.summary.largest_cluster_size || 0),
-      formatNum(stakeXnt, 0),
+// v1.3.0: client-side cluster detection with operational thresholds.
+//
+// Bug pre-1.3.0: the dashboard was reading n_signature_groups +
+// largest_cluster_total_stake_xnt from summary.json, which the daemon
+// computes WITHOUT a stake floor. Result: the largest reported cluster
+// was typically 44 testnet/zombie validators sharing a near-zero drift
+// reading at 0 XNT total stake — operationally meaningless.
+//
+// Fix: detect clusters here from validators[] with two floors:
+//   * ≥ 3 validators per cluster (rules out coincidence-of-2)
+//   * ≥ 100 XNT total stake (rules out zombie-account groups)
+// Anything that fails the stake floor is counted as "noise" and shown
+// as a separate informational note so users know how many groups got
+// filtered.
+const CLUSTER_MIN_TOTAL_STAKE_LAMPORTS = 100 * 1_000_000_000; // 100 XNT
+const CLUSTER_MIN_VALIDATORS = 3;
+const CLUSTER_DRIFT_PRECISION_MS = 0.1;
+
+function detectDriftClusters() {
+  const validators = state.validators || [];
+  const groups = new Map();
+  for (const v of validators) {
+    if (typeof v.mean_drift_ms !== 'number') continue;
+    const key = Math.round(v.mean_drift_ms / CLUSTER_DRIFT_PRECISION_MS) *
+      CLUSTER_DRIFT_PRECISION_MS;
+    let g = groups.get(key);
+    if (!g) {
+      g = { drift: key, validators: [], totalStakeLamports: 0 };
+      groups.set(key, g);
+    }
+    g.validators.push(v.pubkey);
+    g.totalStakeLamports += (v.stake_lamports || 0);
+  }
+  const allClusters = Array.from(groups.values()).filter(
+    (g) => g.validators.length >= CLUSTER_MIN_VALIDATORS,
+  );
+  const meaningful = allClusters
+    .filter((g) => g.totalStakeLamports >= CLUSTER_MIN_TOTAL_STAKE_LAMPORTS)
+    .sort((a, b) =>
+      b.totalStakeLamports - a.totalStakeLamports ||
+      b.validators.length - a.validators.length,
     );
+  const noiseCount = allClusters.length - meaningful.length;
+  return { meaningful, noiseCount };
+}
+
+// XNT formatter for cluster stake totals — same tier scale as the
+// scatter axis so units feel consistent across the analytics section.
+function formatXntStake(lamports) {
+  const xnt = (lamports || 0) / 1_000_000_000;
+  if (xnt < 1000) return Math.round(xnt).toLocaleString() + ' XNT';
+  if (xnt < 1_000_000) return (xnt / 1000).toFixed(1) + 'k XNT';
+  return (xnt / 1_000_000).toFixed(2) + 'M XNT';
+}
+
+function renderClusters() {
+  const t = I18N[state.lang];
+  const { meaningful, noiseCount } = detectDriftClusters();
+  const totalValidators = (state.validators || []).length;
+  const validatorsInClusters = meaningful.reduce(
+    (sum, c) => sum + c.validators.length, 0,
+  );
+  const pctOfNetwork = totalValidators > 0
+    ? ((validatorsInClusters / totalValidators) * 100).toFixed(1) + '%'
+    : '—';
+
+  if (el.nClusters) el.nClusters.textContent = formatInt(meaningful.length);
+  if (el.nClustered) el.nClustered.textContent = formatInt(validatorsInClusters);
+  if (el.nClusteredPct) {
+    el.nClusteredPct.textContent = totalValidators > 0 ? ` (${pctOfNetwork})` : '';
+  }
+
+  if (meaningful.length > 0) {
+    const largest = meaningful[0];
+    if (el.largestCluster) {
+      el.largestCluster.textContent = `${largest.validators.length} ${t.cluster_validators_word} · ${formatXntStake(largest.totalStakeLamports)}`;
+    }
+    if (el.largestClusterDrift) {
+      const sign = largest.drift >= 0 ? '+' : '−';
+      const mag = Math.abs(largest.drift).toFixed(1);
+      el.largestClusterDrift.textContent = `drift: ${sign}${mag} ms`;
+    }
   } else {
-    el.largestCluster.textContent = '—';
+    if (el.largestCluster) el.largestCluster.textContent = t.cluster_none;
+    if (el.largestClusterDrift) el.largestClusterDrift.textContent = '';
+  }
+
+  if (el.clusterNoiseCount) {
+    el.clusterNoiseCount.textContent = noiseCount > 0
+      ? `${noiseCount} ${t.cluster_noise_filtered_word}`
+      : '';
   }
 }
 
