@@ -212,6 +212,14 @@
     <div class="chart-frame">
       <canvas id="chart-foundation-trend"></canvas>
     </div>
+    <!-- v1.4.0: outlier alert mirrors the v0.7.0 #network-outlier-alert
+         pattern — surfaces the actual ms values when chart Y-axis is
+         clamped at ±5000 ms (e.g. Tachyon v3.0.15 deployment spike). -->
+    <div class="outlier-alert" id="foundation-outlier-alert" hidden>
+      <div class="outlier-alert-title" data-i18n="foundation_outlier_alert_title">⚠️ Operational events detected (values clamped on chart):</div>
+      <ul class="outlier-alert-list" id="foundation-outlier-list"></ul>
+      <p class="outlier-hint" data-i18n="foundation_outlier_hint">Spikes &gt;5 s typically indicate node restarts (Tachyon updates, deployments, infrastructure changes). Values clamped at ±5000 ms; actual values listed above.</p>
+    </div>
   </section>
 
   <!-- ===== ANOMALIES & DEVIATIONS — split into Tier 1 + Tier 2 (v1.0.0) ===== -->

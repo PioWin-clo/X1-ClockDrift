@@ -978,6 +978,15 @@ table.foundation-table tr:hover td { background: var(--surface-2); }
   color: var(--warn);
   margin-right: 4px;
 }
+/* v1.4.0 — explanatory footer inside the outlier alert (used by the
+   foundation-trend variant). Subtle so it doesn't compete with the
+   actual list of events above it. */
+.outlier-alert .outlier-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
 
 /* ===== v1.0.0: Anomalies & deviations (Tier 1 + Tier 2) ===== */
 .anomalies-section {
