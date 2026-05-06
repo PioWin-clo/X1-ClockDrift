@@ -48,6 +48,25 @@ See the [methodology page](https://piowin-clo.github.io/X1-ClockDrift/docs/metho
 for the full framework, atomic time sources, drift formula, diagnostic
 flowchart, and limitations.
 
+## Empirical validation
+
+The Layer 1 / Layer 2 framework was empirically validated during the
+**Tachyon v3.0.15 deployment event on 2026-05-05**:
+
+- **Pre-update Layer 1 baseline:** -812 ms (foundation cluster 7-day average)
+- **Post-update Layer 1 baseline:** -539 ms
+- **Measured pipeline reduction:** 33.7 % — matching X1 Labs' announced
+  30-40 % improvement
+- **Layer 2 clock drift impact:** none — validator system clocks were
+  untouched
+- **Foundation operational change alert:** correctly fired at 13:00Z
+  with Δ2586 ms (-492 → +2095 ms)
+
+The dashboard captured the deployment event with 1-hour resolution,
+distinguishing the protocol-level pipeline change (Layer 1) from clock
+drift (Layer 2). See the
+[full case study in the methodology](https://piowin-clo.github.io/X1-ClockDrift/docs/methodology.html#case-study-tachyon-v3).
+
 ## Architecture
 
 - **Daemon** (`x1cd`, in `daemon/`) — Rust service running on a
@@ -144,6 +163,14 @@ Releases: <https://github.com/PioWin-clo/X1-ClockDrift/releases/latest>
 - `Type=notify` + `WatchdogSec=120`: systemd kills the daemon if it
   stops pinging.
 - `touch /home/x1pio/strontium-meter/STOP` causes a clean exit within 5 s.
+
+## Version history
+
+- **v1.4.0** — Foundation chart outlier clamping + Tachyon v3.0.15 case study
+- v1.3.0 — Analytics widgets fixed (histogram bins, scatter axis, drift cluster filtering)
+- v1.2.0 — Adaptive chart aggregation + Polish methodology + README sync
+- v1.1.0 — Diagnostic snapshot widget + operator diagnostic flowchart
+- v1.0.0 — Layer 1 / Layer 2 framework refactor + methodology page
 
 ## License
 

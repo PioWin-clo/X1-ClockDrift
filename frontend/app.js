@@ -71,6 +71,11 @@ const I18N = {
     foundation_trend_min: 'min',
     foundation_trend_max: 'max',
 
+    // v1.4.0 — foundation chart outlier alert (mirrors v0.7.0 network-chart pattern)
+    foundation_outlier_alert_title: '⚠️ Operational events detected (values clamped on chart):',
+    foundation_outlier_likely_restart: 'likely node restart event',
+    foundation_outlier_hint: 'Spikes >5 s typically indicate node restarts (Tachyon updates, deployments, infrastructure changes). Values clamped at ±5000 ms; actual values listed above.',
+
     // v1.0.0 Best — pipeline efficiency
     best_top_title: 'Top pipeline efficient validators (top 10)',
     best_top_subtitle: '≥100 samples · |lag|<5 s · foundation excluded · sorted by ABS(lag) ascending',
@@ -281,6 +286,11 @@ const I18N = {
     foundation_trend_avg: 'średnie opóźnienie',
     foundation_trend_min: 'min',
     foundation_trend_max: 'max',
+
+    // v1.4.0 — outlier alert dla wykresu fundacji
+    foundation_outlier_alert_title: '⚠️ Wykryto zdarzenia operacyjne (wartości przycięte na wykresie):',
+    foundation_outlier_likely_restart: 'prawdopodobnie restart węzła',
+    foundation_outlier_hint: 'Skoki >5 s zwykle oznaczają restart węzłów (aktualizacje Tachyon, deployments, zmiany infrastruktury). Wartości przycięte na ±5000 ms; rzeczywiste wartości wymienione powyżej.',
 
     // v1.0.0 Best — efektywność pipeline
     best_top_title: 'Najefektywniejszy pipeline (top 10)',
@@ -1301,6 +1311,18 @@ function renderNetworkOutlierAlert(outliers) {
 /// Plus stat-cards: current, 7d-ago delta, active node count, alert if
 /// any 1h bucket jumped >100ms vs the previous bucket.
 const FOUNDATION_JUMP_THRESHOLD_MS = 100;
+// v1.4.0: same pattern as v0.7.0's NETWORK_OUTLIER_THRESHOLD_MS.
+// Foundation chart got pancaked by the Tachyon v3.0.15 deployment on
+// 2026-05-05 13:00Z — max bucket value hit +49,891 ms during node
+// restarts, stretching the y-axis to 50k and flattening the rest of
+// the line. We now clamp the line data at ±5000 ms (outliers stay
+// visible as flat segments at the axis edge) and surface real values
+// in a separate outlier-alert panel below the chart.
+const FOUNDATION_OUTLIER_THRESHOLD_MS = 5000;
+// Spikes above this magnitude are almost always restart events
+// (Tachyon updates, deployments, infrastructure changes), not clock
+// skew — used to tag entries in the outlier alert.
+const FOUNDATION_RESTART_HINT_MS = 30_000;
 let chartFoundationTrend = null;
 
 function renderFoundationTrend() {
@@ -1368,8 +1390,40 @@ function renderFoundationTrend() {
     alertCard.hidden = true;
   }
 
+  // v1.4.0: outlier detection + clamping. Run a single pass over the
+  // raw data identifying buckets where any of avg/max/min exceeds
+  // ±5 s, surface them in the alert panel below the chart, and clamp
+  // the values fed to Chart.js so a single 50 s spike doesn't squash
+  // the rest of the line.
+  const outliers = [];
+  for (const d of data) {
+    const a = typeof d.avg_drift_ms === 'number' ? d.avg_drift_ms : 0;
+    const mx = typeof d.max_drift_ms === 'number' ? d.max_drift_ms : 0;
+    const mn = typeof d.min_drift_ms === 'number' ? d.min_drift_ms : 0;
+    if (
+      Math.abs(a)  > FOUNDATION_OUTLIER_THRESHOLD_MS ||
+      Math.abs(mx) > FOUNDATION_OUTLIER_THRESHOLD_MS ||
+      Math.abs(mn) > FOUNDATION_OUTLIER_THRESHOLD_MS
+    ) {
+      outliers.push({
+        bucket_ms: d.bucket_ms,
+        avg_drift_ms: d.avg_drift_ms,
+        max_drift_ms: d.max_drift_ms,
+        min_drift_ms: d.min_drift_ms,
+      });
+    }
+  }
+  const clamp = (v) => {
+    if (typeof v !== 'number') return null;
+    if (Math.abs(v) <= FOUNDATION_OUTLIER_THRESHOLD_MS) return v;
+    return v > 0 ? FOUNDATION_OUTLIER_THRESHOLD_MS : -FOUNDATION_OUTLIER_THRESHOLD_MS;
+  };
+
   const ctx = document.getElementById('chart-foundation-trend');
-  if (!ctx || !window.Chart) return;
+  if (!ctx || !window.Chart) {
+    renderFoundationOutlierAlert(outliers);
+    return;
+  }
   if (chartFoundationTrend) chartFoundationTrend.destroy();
   chartFoundationTrend = new Chart(ctx, {
     type: 'line',
@@ -1378,7 +1432,7 @@ function renderFoundationTrend() {
       datasets: [
         {
           label: t.foundation_trend_max,
-          data: data.map((d) => d.max_drift_ms),
+          data: data.map((d) => clamp(d.max_drift_ms)),
           borderColor: 'rgba(248, 81, 73, 0.4)',
           backgroundColor: 'rgba(248, 81, 73, 0.05)',
           fill: '+1',
@@ -1388,7 +1442,7 @@ function renderFoundationTrend() {
         },
         {
           label: t.foundation_trend_min,
-          data: data.map((d) => d.min_drift_ms),
+          data: data.map((d) => clamp(d.min_drift_ms)),
           borderColor: 'rgba(63, 185, 80, 0.4)',
           backgroundColor: 'transparent',
           fill: false,
@@ -1398,7 +1452,7 @@ function renderFoundationTrend() {
         },
         {
           label: t.foundation_trend_avg,
-          data: data.map((d) => d.avg_drift_ms),
+          data: data.map((d) => clamp(d.avg_drift_ms)),
           borderColor: '#58a6ff',
           backgroundColor: 'transparent',
           fill: false,
@@ -1410,6 +1464,43 @@ function renderFoundationTrend() {
     },
     options: chartCommonOpts({ yLabel: 'drift (ms)' }),
   });
+
+  renderFoundationOutlierAlert(outliers);
+}
+
+// v1.4.0: list outlier buckets (where any of avg/max/min exceeds ±5 s)
+// below the foundation trend chart. Pattern mirrors v0.7.0's
+// renderNetworkOutlierAlert: hidden when zero outliers, otherwise one
+// <li> per bucket with timestamp + max/avg in seconds. Buckets whose
+// max is ≥ 30 s are tagged with the "likely restart event" hint —
+// at that magnitude the only realistic source is a node writing
+// placeholder timestamps during restart, not actual clock skew.
+function renderFoundationOutlierAlert(outliers) {
+  const alertEl = document.getElementById('foundation-outlier-alert');
+  const listEl = document.getElementById('foundation-outlier-list');
+  if (!alertEl || !listEl) return;
+  if (!outliers || outliers.length === 0) {
+    alertEl.hidden = true;
+    listEl.innerHTML = '';
+    return;
+  }
+  const t = I18N[state.lang];
+  alertEl.hidden = false;
+  listEl.innerHTML = '';
+  // Chronological order — operators reading this scroll from oldest
+  // to newest event, matching the chart's left-to-right time axis.
+  const sorted = outliers.slice().sort((a, b) => (a.bucket_ms || 0) - (b.bucket_ms || 0));
+  for (const o of sorted) {
+    const li = document.createElement('li');
+    const ts = new Date(o.bucket_ms).toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+    const maxS = ((o.max_drift_ms || 0) / 1000).toFixed(1);
+    const avgS = ((o.avg_drift_ms || 0) / 1000).toFixed(1);
+    const note = Math.abs(o.max_drift_ms || 0) >= FOUNDATION_RESTART_HINT_MS
+      ? ` — ${t.foundation_outlier_likely_restart}`
+      : '';
+    li.textContent = `${ts}: max ${maxS} s, avg ${avgS} s${note}`;
+    listEl.appendChild(li);
+  }
 }
 
 let chartHistogram = null;
