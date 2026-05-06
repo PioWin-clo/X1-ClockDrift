@@ -127,6 +127,16 @@ const I18N = {
     // v1.1.0 — diagnostic snapshot widget (between Hero #2 and chart)
     diagnostic_snapshot_title: 'Network diagnostic snapshot',
     diagnostic_snapshot_subtitle: 'Side-by-side: pipeline health vs clock drift outliers',
+
+    // v1.5.0 — Network state widget (active vs observed validators)
+    network_state_title: 'Network state',
+    network_state_active: 'Active validators',
+    network_state_active_help: 'Voted within last ~7 minutes',
+    network_state_observed: 'Observed (last 24h)',
+    network_state_observed_help: 'All validators in daemon database',
+    network_state_zombie: 'Zombie data',
+    network_state_zombie_help: 'Stopped voting (likely Capybara cleanup)',
+    network_state_note_html: 'All charts and tables below show <strong>active validators only</strong>. Zombies excluded since 2026-05-06.',
     layer_1_label: 'Layer 1',
     layer_2_label: 'Layer 2',
     snapshot_pipeline_title: 'Vote pipeline latency',
@@ -343,6 +353,16 @@ const I18N = {
     // v1.1.0 — diagnostyczny snapshot
     diagnostic_snapshot_title: 'Diagnostyczny snapshot sieci',
     diagnostic_snapshot_subtitle: 'Side-by-side: stan pipeline vs odchylenia zegarów',
+
+    // v1.5.0 — widget Stan sieci (aktywni vs zaobserwowani walidatorzy)
+    network_state_title: 'Stan sieci',
+    network_state_active: 'Aktywni walidatorzy',
+    network_state_active_help: 'Głosowali w ciągu ostatnich ~7 minut',
+    network_state_observed: 'Zaobserwowani (ostatnie 24 h)',
+    network_state_observed_help: 'Wszyscy walidatorzy w bazie daemona',
+    network_state_zombie: 'Zombie data',
+    network_state_zombie_help: 'Przestali głosować (prawdopodobnie Capybara cleanup)',
+    network_state_note_html: 'Wszystkie wykresy i tabele poniżej pokazują <strong>tylko aktywnych walidatorów</strong>. Zombies wykluczone od 2026-05-06.',
     layer_1_label: 'Layer 1',
     layer_2_label: 'Layer 2',
     snapshot_pipeline_title: 'Opóźnienie pipeline głosowania',
@@ -476,12 +496,38 @@ const state = {
   // doesn't squash the baseline line into a flat strip.
   networkDriftWindowDays: 6,
   showOutliers: false,
+  // v1.5.0: active vs observed validator counts surfaced on the
+  // Network state widget. Derived after every data fetch from
+  // summary.json (fields published by the daemon at 1.5.0+).
+  activeValidatorCount: 0,
+  observedValidatorCount: 0,
+  zombieValidatorCount: 0,
 };
 // v0.7.0: y-axis hard cap when outliers are clamped. Anything above this
 // is rendered as a triangular marker on the chart edge + listed in the
 // outlier-alert div so operators still see real chain-time anomalies.
 const NETWORK_OUTLIER_THRESHOLD_MS = 5000;
 const VALID_WINDOW_DAYS = [2, 4, 6, 12];
+
+// v1.5.0: active-validator threshold. Mirror of the daemon's
+// ACTIVE_VALIDATOR_MAX_SLOT_BEHIND constant — must stay in sync.
+// 1000 slots ≈ 7 minutes (X1 produces ~2.5 slots/sec). High enough to
+// absorb leader-rotation jitter and brief network blips, low enough to
+// exclude post-Capybara-cleanup zombies (vote_accounts that went
+// silent 6-12 h ago when their delegated stake was withdrawn). The
+// daemon publishes `chain_max_slot` + `active_validators` in
+// summary.json so the frontend can verify its own count matches.
+const ACTIVE_VALIDATOR_MAX_SLOT_BEHIND = 1000;
+
+// v1.5.0: returns true if this validator's last observed vote is recent
+// enough to count as actively voting. `chainMaxSlot` is the highest
+// slot the daemon has on file. When summary.json doesn't carry that
+// field yet (pre-1.5.0 snapshots), default to "active" so an old
+// data branch doesn't blank the dashboard during a roll-forward.
+function isActiveValidator(v, chainMaxSlot) {
+  if (!chainMaxSlot || typeof v.last_seen_slot !== 'number') return true;
+  return chainMaxSlot - v.last_seen_slot <= ACTIVE_VALIDATOR_MAX_SLOT_BEHIND;
+}
 
 // v1.2.0: adaptive bucket aggregation — at 4d/6d/12d windows the raw
 // 5-min buckets exceed the chart canvas pixel count (~1100 px), so
@@ -567,6 +613,10 @@ function bindElements() {
   el.snapshotDriftCount = document.getElementById('snapshot-drift-count');
   el.snapshotDriftStatus = document.getElementById('snapshot-drift-status');
   el.snapshotDriftWorst = document.getElementById('snapshot-drift-worst');
+  // v1.5.0: Network state widget (active vs observed validator counts).
+  el.networkActiveCount = document.getElementById('network-active-count');
+  el.networkObservedCount = document.getElementById('network-observed-count');
+  el.networkZombieCount = document.getElementById('network-zombie-count');
   el.bestSyncedBody = document.getElementById('best-synced-body');
   el.foundationBody = document.getElementById('foundation-body');
   el.sourcesBody = document.getElementById('sources-body');
@@ -744,6 +794,24 @@ async function loadAll() {
     state.foundation = foundation || [];
     state.foundationTrend = foundationTrend || [];
     state.chrony = chrony;
+    // v1.5.0: derive network-state counts. Prefer the daemon's
+    // pre-computed numbers from summary.json (so the widget agrees
+    // exactly with whatever the daemon's threshold produced); fall
+    // back to a client-side recount over state.validators when an
+    // older data branch is still serving pre-1.5.0 summary.json.
+    const observed = typeof state.summary?.observed_validators === 'number'
+      ? state.summary.observed_validators
+      : state.validators.length;
+    let active;
+    if (typeof state.summary?.active_validators === 'number') {
+      active = state.summary.active_validators;
+    } else {
+      const chainMaxSlot = state.summary?.chain_max_slot;
+      active = state.validators.filter((v) => isActiveValidator(v, chainMaxSlot)).length;
+    }
+    state.observedValidatorCount = observed;
+    state.activeValidatorCount = active;
+    state.zombieValidatorCount = Math.max(0, observed - active);
     renderAll();
   } catch (e) {
     console.error('load failed', e);
@@ -768,8 +836,16 @@ async function fetchJSONOptional(path) {
 }
 
 function visibleValidators() {
+  // v1.5.0: drop zombies (post-Capybara-cleanup vote_accounts that
+  // stopped voting 6-12 h ago) from every analytics widget that
+  // funnels through this gate — histogram, scatter, cluster
+  // detection, hero #2 health cards. Foundation table reads
+  // state.foundation directly and is unaffected (foundation is
+  // pre-filtered by daemon and always active).
+  const chainMaxSlot = state.summary?.chain_max_slot;
   return state.validators.filter((v) => {
     if (state.hideFoundation && v.is_foundation) return false;
+    if (!isActiveValidator(v, chainMaxSlot)) return false;
     return true;
   });
 }
@@ -777,6 +853,7 @@ function visibleValidators() {
 function renderAll() {
   renderHeader();
   renderHero1();
+  renderNetworkState();        // v1.5.0
   renderHero2();
   renderDiagnosticSnapshot();  // v1.1.0
   renderClock();
@@ -973,6 +1050,26 @@ function renderDiagnosticSnapshot() {
       el.snapshotDriftWorst.textContent =
         `${sign}${Math.abs(parseFloat(driftSec)).toFixed(1)} s · ${shorten(pubkey)}`;
     }
+  }
+}
+
+// v1.5.0: Network state widget — three at-a-glance counts that
+// summarise the population every other widget on the page is now
+// filtered to. "Active" is the number of validators that have voted
+// within the last ~7 minutes; "Observed" is the daemon's full
+// drift-summary table (typically 2-4× larger after the Capybara
+// cleanup); "Zombie" is the difference. The values are formatted with
+// thousand separators since post-cleanup these numbers cross the 1000
+// boundary regularly.
+function renderNetworkState() {
+  if (el.networkActiveCount) {
+    el.networkActiveCount.textContent = formatInt(state.activeValidatorCount || 0);
+  }
+  if (el.networkObservedCount) {
+    el.networkObservedCount.textContent = formatInt(state.observedValidatorCount || 0);
+  }
+  if (el.networkZombieCount) {
+    el.networkZombieCount.textContent = formatInt(state.zombieValidatorCount || 0);
   }
 }
 
@@ -1778,7 +1875,13 @@ const CLUSTER_MIN_VALIDATORS = 3;
 const CLUSTER_DRIFT_PRECISION_MS = 0.1;
 
 function detectDriftClusters() {
-  const validators = state.validators || [];
+  // v1.5.0: switch from raw state.validators to visibleValidators(),
+  // which now also drops zombies. The Capybara cleanup case study
+  // documents the impact: pre-cleanup the "largest cluster" was
+  // routinely dominated by ~150 zombie farms with stake near zero;
+  // now the largest cluster reflects the network's real operational
+  // structure (shared infra / hosting / NTP source groups).
+  const validators = visibleValidators();
   const groups = new Map();
   for (const v of validators) {
     if (typeof v.mean_drift_ms !== 'number') continue;
@@ -1859,10 +1962,17 @@ function renderBestSynced() {
   // v0.6.0: optional client-side stake lens. Server returns all stake
   // levels — user can narrow the view to e.g. ≥1000 XNT here without
   // affecting other dashboards or the backend filter logic.
+  // v1.5.0: also filter zombies. The daemon-side best-synced query
+  // doesn't know about active-vs-zombie because it predates the
+  // post-Capybara situation. We drop entries whose last_seen_slot
+  // is too far behind chain head so the "Top pipeline efficient"
+  // ranking only shows currently-voting validators.
   const minXnt = state.bestMinStake || 0;
+  const chainMaxSlot = state.summary?.chain_max_slot;
+  const activeFiltered = state.best.filter((b) => isActiveValidator(b, chainMaxSlot));
   const rows = minXnt > 0
-    ? state.best.filter((b) => (b.stake_xnt || 0) >= minXnt)
-    : state.best;
+    ? activeFiltered.filter((b) => (b.stake_xnt || 0) >= minXnt)
+    : activeFiltered;
   rows.forEach((b) => {
     const tr = document.createElement('tr');
     tr.appendChild(td(String(b.rank)));
@@ -1885,7 +1995,14 @@ function renderBestSynced() {
 function renderClockDriftTable() {
   if (!el.clockDriftBody) return;
   el.clockDriftBody.innerHTML = '';
-  const rows = Array.isArray(state.clockDrift) ? state.clockDrift : [];
+  const all = Array.isArray(state.clockDrift) ? state.clockDrift : [];
+  // v1.5.0: filter zombies. A vote_account with -25 s drift that
+  // hasn't voted in 12 hours isn't operationally interesting any
+  // more — the operator already left the validator set. Active-only
+  // keeps the Layer 2 table focused on currently-voting clocks that
+  // need fixing.
+  const chainMaxSlot = state.summary?.chain_max_slot;
+  const rows = all.filter((v) => isActiveValidator(v, chainMaxSlot));
   if (rows.length === 0) {
     if (el.clockDriftEmpty) el.clockDriftEmpty.hidden = false;
     return;
@@ -1949,8 +2066,12 @@ function applyWorstFilter() {
   const q = state.query;
   const sevFilter = state.severityFilter;
   const minXnt = state.worstMinStake || 0;
+  // v1.5.0: also drop zombies — a 1-XNT vote_account with -2 s lag
+  // that stopped voting hours ago isn't actionable for anyone.
+  const chainMaxSlot = state.summary?.chain_max_slot;
   state.filtered = (state.worst || []).filter((v) => {
     if (state.hideFoundation && v.is_foundation) return false;
+    if (!isActiveValidator(v, chainMaxSlot)) return false;
     if (minXnt > 0 && (v.stake_xnt || 0) < minXnt) return false;
     const pubkey = v.vote_account || v.pubkey || '';
     if (q && !pubkey.toLowerCase().includes(q)) return false;

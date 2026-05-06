@@ -1202,6 +1202,186 @@ pool pool.ntp.org iburst maxsources 4</code></pre>
     </div>
   </section>
 
+  <!-- v1.5.0: Capybara delegation cleanup case study. Same anchor
+       pattern as #case-study-tachyon-v3 — id on the always-rendered
+       outer wrapper so the link works in both languages. -->
+  <section class="case-study" id="case-study-capybara-cleanup">
+    <div lang="en">
+      <h2>Case study: Capybara delegation cleanup (2026-05-05 to 2026-05-06)</h2>
+
+      <p class="lead">
+        Within 36 hours of the Tachyon v3.0.15 deployment, the X1 Labs
+        delegation program and the Capybara protocol executed a
+        coordinated cleanup of farming validators. The dashboard
+        captured both events in succession — providing a second
+        validation case for the Layer 1 / Layer 2 framework: this
+        time showing that <strong>governance / economic events affect
+        neither layer&rsquo;s measurements</strong>.
+      </p>
+
+      <h3>Observed timeline</h3>
+
+      <table class="case-study-table">
+        <thead>
+          <tr><th>Date</th><th>Validators in network</th><th>Active</th><th>Event</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>2026-05-04</td><td>~2,400</td><td>~2,400</td><td>Pre-cleanup baseline</td></tr>
+          <tr><td>2026-05-05</td><td>~1,700</td><td>~1,700</td><td>Wave 1 — first farms cut</td></tr>
+          <tr class="case-study-event">
+            <td><strong>2026-05-06</strong></td>
+            <td><strong>1,918 observed</strong></td>
+            <td><strong>1,008 active</strong></td>
+            <td>🟡 <strong>Wave 2 — 900 validators stopped voting</strong></td>
+          </tr>
+          <tr><td>x1val.online (live)</td><td>—</td><td>867 nodes / 828 producers</td><td>Cross-reference</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Measured impact</h3>
+
+      <ul>
+        <li><strong>Active validators</strong> (<code>last_seen_slot</code> &lt; 1000 slots ago): 1,008</li>
+        <li><strong>Zombies</strong> (50,000-100,000 slots behind): 900 — stopped voting 6-12 h ago</li>
+        <li><strong>Stake distribution:</strong> 1,241 of 1,918 (65 %) had only 1-2 XNT remaining (median 2 XNT) — characteristic of a post-Capybara state</li>
+        <li><strong>Layer 1 baseline:</strong> unchanged (-540 ms) — protocol untouched</li>
+        <li><strong>Layer 2 outliers:</strong> unchanged (one validator, <code>9XcM7f…mVLr7w</code>, at -25.1 s)</li>
+        <li><strong>Foundation cluster:</strong> unaffected (12 / 12 active)</li>
+      </ul>
+
+      <h3>Why this validates the framework</h3>
+
+      <p>
+        The Tachyon v3.0.15 deployment changed Layer 1 only (33.7 %
+        reduction). The Capybara cleanup changed neither Layer 1 nor
+        Layer 2 — it changed the <em>economic</em> state of the
+        network. Two events, two different effect surfaces, both
+        correctly classified by the dashboard.
+      </p>
+
+      <p>
+        Identical-drift cluster detection benefited dramatically:
+        pre-cleanup the &ldquo;largest cluster&rdquo; was often
+        dominated by zombie farms with stake near zero; post-cleanup
+        the largest meaningful cluster shrank from 154 detected to
+        ~20 (filtered to ≥100 XNT total stake), and the network&rsquo;s
+        true operational structure became visible.
+      </p>
+
+      <h3>Why we filter zombies</h3>
+
+      <p>
+        Zombie validators continue sending vote messages with their
+        original <code>vote_account</code> after their delegated stake
+        is withdrawn. The daemon observes these votes as it would any
+        other. Without filtering, histograms, scatter plots, and
+        cluster detection would all be biased by data from validators
+        that no longer participate in consensus in any meaningful way.
+      </p>
+
+      <p>
+        Starting v1.5.0, the dashboard filters validators whose
+        <code>last_seen_slot</code> is more than 1000 slots behind the
+        chain head (~7 minutes). This correctly excludes
+        Capybara-cleaned farms while preserving validators with brief
+        delays from leader-rotation jitter or temporary network
+        issues. The daemon publishes <code>chain_max_slot</code>,
+        <code>active_validators</code>, and
+        <code>observed_validators</code> in <code>summary.json</code>
+        so the Network state widget at the top of the dashboard shows
+        both numbers explicitly.
+      </p>
+    </div>
+
+    <div lang="pl">
+      <h2>Case study: cleanup delegacji Capybara (2026-05-05 do 2026-05-06)</h2>
+
+      <p class="lead">
+        W ciągu 36 godzin od wdrożenia Tachyon v3.0.15 program
+        delegacji X1 Labs i protokół Capybara wykonały skoordynowany
+        cleanup farming validators. Dashboard zarejestrował oba
+        zdarzenia w sekwencji — dostarczając drugiego case study dla
+        framework Layer 1 / Layer 2: tym razem pokazującego, że
+        <strong>zdarzenia governance / ekonomiczne nie wpływają na
+        pomiary żadnej z warstw</strong>.
+      </p>
+
+      <h3>Zaobserwowana oś czasu</h3>
+
+      <table class="case-study-table">
+        <thead>
+          <tr><th>Data</th><th>Walidatorzy w sieci</th><th>Aktywni</th><th>Zdarzenie</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>2026-05-04</td><td>~2,400</td><td>~2,400</td><td>Baseline pre-cleanup</td></tr>
+          <tr><td>2026-05-05</td><td>~1,700</td><td>~1,700</td><td>Wave 1 — pierwsze farmy wycięte</td></tr>
+          <tr class="case-study-event">
+            <td><strong>2026-05-06</strong></td>
+            <td><strong>1,918 obserwowanych</strong></td>
+            <td><strong>1,008 aktywnych</strong></td>
+            <td>🟡 <strong>Wave 2 — 900 walidatorów przestało głosować</strong></td>
+          </tr>
+          <tr><td>x1val.online (live)</td><td>—</td><td>867 nodów / 828 block producerów</td><td>Cross-reference</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Zmierzony wpływ</h3>
+
+      <ul>
+        <li><strong>Aktywni walidatorzy</strong> (<code>last_seen_slot</code> &lt; 1000 slotów temu): 1,008</li>
+        <li><strong>Zombies</strong> (50,000-100,000 slotów temu): 900 — przestali głosować 6-12 h temu</li>
+        <li><strong>Rozkład stake:</strong> 1,241 z 1,918 (65 %) miało tylko 1-2 XNT (mediana 2 XNT) — charakterystyczne dla stanu post-Capybara</li>
+        <li><strong>Layer 1 baseline:</strong> bez zmian (-540 ms) — protokół nietknięty</li>
+        <li><strong>Layer 2 outliers:</strong> bez zmian (jeden walidator, <code>9XcM7f…mVLr7w</code>, dryf -25.1 s)</li>
+        <li><strong>Klaster fundacji:</strong> bez wpływu (12 / 12 aktywnych)</li>
+      </ul>
+
+      <h3>Dlaczego to waliduje framework</h3>
+
+      <p>
+        Wdrożenie Tachyon v3.0.15 zmieniło tylko Layer 1 (redukcja
+        33.7 %). Capybara cleanup nie zmienił ani Layer 1, ani
+        Layer 2 — zmienił <em>ekonomiczny</em> stan sieci. Dwa
+        zdarzenia, dwie różne powierzchnie efektu, oba poprawnie
+        sklasyfikowane przez dashboard.
+      </p>
+
+      <p>
+        Wykrywanie identical-drift clusters dramatycznie skorzystało:
+        pre-cleanup &bdquo;największy klaster&rdquo; był często
+        zdominowany przez zombie farmy ze stake blisko zera;
+        post-cleanup największy znaczący klaster zmalał ze 154
+        wykrytych do ~20 (filtrowane do ≥100 XNT total stake), i stała
+        się widoczna prawdziwa operacyjna struktura sieci.
+      </p>
+
+      <h3>Dlaczego filtrujemy zombies</h3>
+
+      <p>
+        Walidatorzy-zombies kontynuują wysyłanie vote messages ze
+        swoim oryginalnym <code>vote_account</code> po wycofaniu
+        delegowanego stake. Daemon obserwuje te vote&rsquo;y jak
+        każde inne. Bez filtracji histogramy, scatter ploty i
+        wykrywanie klastrów byłyby biased przez dane od walidatorów
+        którzy już nie uczestniczą w konsensusie w żaden znaczący
+        sposób.
+      </p>
+
+      <p>
+        Począwszy od v1.5.0 dashboard filtruje walidatorów, których
+        <code>last_seen_slot</code> jest więcej niż 1000 slotów za
+        chain head (~7 minut). To poprawnie wyklucza farmy wycięte
+        przez Capybara, zachowując walidatorów z krótkimi
+        opóźnieniami od leader-rotation jitter lub tymczasowych
+        problemów sieci. Daemon publikuje
+        <code>chain_max_slot</code>, <code>active_validators</code> i
+        <code>observed_validators</code> w <code>summary.json</code>,
+        więc widget Stan sieci na górze dashboardu pokazuje obie
+        liczby jawnie.
+      </p>
+    </div>
+  </section>
+
   <div lang="en">
     <h2>Limitations &amp; caveats</h2>
     <ul>
@@ -1280,7 +1460,8 @@ pool pool.ntp.org iburst maxsources 4</code></pre>
   <div lang="en">
     <h2>Version history</h2>
     <ul>
-      <li><strong>v1.4.0</strong> — Foundation chart outlier clamping + Tachyon v3.0.15 case study</li>
+      <li><strong>v1.5.0</strong> — Active-validators filter + Capybara delegation cleanup case study</li>
+      <li>v1.4.0 — Foundation chart outlier clamping + Tachyon v3.0.15 case study</li>
       <li>v1.3.0 — Analytics widgets fixed (histogram bins, scatter axis, drift cluster filtering)</li>
       <li>v1.2.0 — Adaptive bucket aggregation for chart readability + Polish methodology + README sync</li>
       <li>v1.1.0 — Diagnostic snapshot widget + operator diagnostic flowchart</li>
@@ -1295,7 +1476,8 @@ pool pool.ntp.org iburst maxsources 4</code></pre>
   <div lang="pl">
     <h2>Historia wersji</h2>
     <ul>
-      <li><strong>v1.4.0</strong> — Outlier clamping wykresu fundacji + case study Tachyon v3.0.15</li>
+      <li><strong>v1.5.0</strong> — Filtr aktywnych walidatorów + case study cleanup delegacji Capybara</li>
+      <li>v1.4.0 — Outlier clamping wykresu fundacji + case study Tachyon v3.0.15</li>
       <li>v1.3.0 — Naprawa widżetów analitycznych (histogram, scatter, klastry dryfu)</li>
       <li>v1.2.0 — Adaptywna agregacja kubełków dla czytelności wykresu + polska metodologia + synchronizacja README</li>
       <li>v1.1.0 — Widget diagnostycznego snapshotu + przewodnik diagnostyki dla operatora</li>

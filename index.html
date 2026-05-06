@@ -44,6 +44,29 @@
     <a href="docs/methodology.html" class="hero-link" data-i18n="methodology_link">methodology</a>
   </section>
 
+  <!-- ===== v1.5.0: Network state — active vs observed validator counts ===== -->
+  <section class="network-state">
+    <h2 class="section-title" data-i18n="network_state_title">Network state</h2>
+    <div class="network-state-grid">
+      <div class="state-card">
+        <div class="state-label" data-i18n="network_state_active">Active validators</div>
+        <div class="state-value mono" id="network-active-count">—</div>
+        <div class="state-detail" data-i18n="network_state_active_help">Voted within last ~7 minutes</div>
+      </div>
+      <div class="state-card state-card-observed">
+        <div class="state-label" data-i18n="network_state_observed">Observed (last 24h)</div>
+        <div class="state-value mono" id="network-observed-count">—</div>
+        <div class="state-detail" data-i18n="network_state_observed_help">All validators in daemon database</div>
+      </div>
+      <div class="state-card state-card-zombie">
+        <div class="state-label" data-i18n="network_state_zombie">Zombie data</div>
+        <div class="state-value mono" id="network-zombie-count">—</div>
+        <div class="state-detail" data-i18n="network_state_zombie_help">Stopped voting (likely Capybara cleanup)</div>
+      </div>
+    </div>
+    <p class="network-state-note" data-i18n-html="network_state_note_html">All charts and tables below show <strong>active validators only</strong>. Zombies excluded since 2026-05-06.</p>
+  </section>
+
   <!-- ===== HERO #2: validator pipeline health (v1.0.0 — Layer 1/2 bands) ===== -->
   <section class="hero hero-health">
     <h2 class="section-title" data-i18n="hero2_title">Validator pipeline health</h2>
