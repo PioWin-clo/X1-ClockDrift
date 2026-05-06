@@ -33,6 +33,16 @@ const WORST_MIN_SAMPLES: i64 = 20;
 const WORST_MIN_ABS_DRIFT_MS: f64 = 500.0;
 /// v0.5.0: foundation drift trend window — 14 days of 1-hour buckets.
 const FOUNDATION_TREND_DAYS: u32 = 14;
+/// v1.5.0: active-validator threshold. A validator is "active" if its
+/// `last_seen_slot` is within this many slots of `MAX(slot_obs.slot)`.
+/// 1000 slots ≈ 7 minutes — high enough to absorb leader-rotation
+/// jitter and brief network blips, low enough to exclude
+/// post-Capybara-cleanup zombies (whose vote_accounts went silent
+/// 6-12 hours ago when their delegation stake was withdrawn). The
+/// frontend's `ACTIVE_VALIDATOR_MAX_SLOT_BEHIND` constant must stay in
+/// sync with this value — the daemon publishes both `chain_max_slot`
+/// and `active_validators` so consumers can verify their own count.
+const ACTIVE_VALIDATOR_MAX_SLOT_BEHIND: i64 = 1000;
 const FOUNDATION_TREND_BUCKET_MINUTES: u32 = 60;
 const HISTORY_BACKFILL_SECS: i64 = 7 * 86400;
 
@@ -124,6 +134,19 @@ struct SummaryJson {
     n_healthy: i64,
     n_foundation: i64,
     n_total: i64,
+
+    // v1.5.0 — active vs zombie validator accounting. After the
+    // Capybara delegation cleanup of 2026-05-05/2026-05-06, ~900 of
+    // the validators in our drift-summary table stopped voting (their
+    // self-stake was withdrawn from the delegation program). They
+    // still have rows in `validator_drift_summary` because the
+    // daemon's history doesn't expire, but their `last_seen_slot` is
+    // far behind chain head. Frontend needs both numbers to render
+    // the "Network state" widget and to filter analytics to the
+    // currently-voting population.
+    chain_max_slot: Option<i64>,
+    active_validators: i64,
+    observed_validators: i64,
 
     // Existing fields (kept for backward compat with v0.3.x consumers)
     n_validators_observed: i64,
@@ -376,6 +399,21 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
     let n_foundation = summaries.iter().filter(|s| s.is_foundation).count() as i64;
     let n_total = summaries.len() as i64;
 
+    // v1.5.0: active = voted within ~7 minutes of chain head (1000
+    // slots ≈ 400 ms × 1000 ÷ 1000 ≈ 400 s, slightly higher than
+    // typical leader rotation jitter). Anything further behind is a
+    // post-Capybara-cleanup zombie that still has a vote_account but
+    // no real stake left. Threshold matches the frontend constant
+    // ACTIVE_VALIDATOR_MAX_SLOT_BEHIND.
+    let active_validators = match latest {
+        Some(max_slot) => summaries
+            .iter()
+            .filter(|s| s.last_seen_slot >= max_slot - ACTIVE_VALIDATOR_MAX_SLOT_BEHIND)
+            .count() as i64,
+        None => n_total,
+    };
+    let observed_validators = n_total;
+
     let summary = SummaryJson {
         generated_at_utc: format_iso(now_secs),
         // Hero #1
@@ -391,6 +429,10 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         n_healthy,
         n_foundation,
         n_total,
+        // v1.5.0 — active/observed split for zombie-aware frontend filtering
+        chain_max_slot: latest,
+        active_validators,
+        observed_validators,
         // Backward-compat
         n_validators_observed: summaries.len() as i64,
         n_samples_24h: total_samples_24h,

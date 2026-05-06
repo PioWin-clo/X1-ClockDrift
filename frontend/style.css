@@ -988,6 +988,68 @@ table.foundation-table tr:hover td { background: var(--surface-2); }
   line-height: 1.5;
 }
 
+/* ===== v1.5.0 — Network state widget (active vs observed counts) ===== */
+.network-state {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 16px 0 24px;
+}
+.network-state > .section-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.network-state-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+@media (max-width: 768px) {
+  .network-state-grid { grid-template-columns: 1fr; }
+}
+.state-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--good);
+}
+/* Observed = neutral accent — it's the universe count, not "good" or
+   "bad" by itself. Zombie = dim border so the eye reads it as the
+   reduce-pile bucket; the value is informational not actionable. */
+.state-card-observed { border-left-color: var(--accent); }
+.state-card-zombie   { border-left-color: var(--text-dim); }
+.state-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
+.state-value {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 4px 0;
+}
+.state-detail {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.network-state-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  line-height: 1.5;
+}
+.network-state-note strong {
+  color: var(--text);
+  font-weight: 600;
+  font-style: normal;
+}
+
 /* ===== v1.0.0: Anomalies & deviations (Tier 1 + Tier 2) ===== */
 .anomalies-section {
   margin-bottom: 24px;

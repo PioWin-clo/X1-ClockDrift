@@ -50,8 +50,11 @@ flowchart, and limitations.
 
 ## Empirical validation
 
-The Layer 1 / Layer 2 framework was empirically validated during the
-**Tachyon v3.0.15 deployment event on 2026-05-05**:
+The Layer 1 / Layer 2 framework was empirically validated by **two
+independent events** within 36 hours, each affecting a different
+"surface" of the network:
+
+### Event 1: Tachyon v3.0.15 deployment (2026-05-05)
 
 - **Pre-update Layer 1 baseline:** -812 ms (foundation cluster 7-day average)
 - **Post-update Layer 1 baseline:** -539 ms
@@ -62,10 +65,22 @@ The Layer 1 / Layer 2 framework was empirically validated during the
 - **Foundation operational change alert:** correctly fired at 13:00Z
   with Δ2586 ms (-492 → +2095 ms)
 
-The dashboard captured the deployment event with 1-hour resolution,
-distinguishing the protocol-level pipeline change (Layer 1) from clock
-drift (Layer 2). See the
-[full case study in the methodology](https://piowin-clo.github.io/X1-ClockDrift/docs/methodology.html#case-study-tachyon-v3).
+Protocol-level change → Layer 1 only. Framework correct.
+
+### Event 2: Capybara delegation cleanup (2026-05-05 to 2026-05-06)
+
+- **Network size:** ~2,400 → ~1,700 → 1,008 active validators in
+  36 hours (cross-checked against x1val.online: 867 nodes / 828 producers)
+- **900 zombie validators** continued voting after stake withdrawal —
+  filtered out of dashboard analytics from v1.5.0 onward
+- **Layer 1 baseline:** unchanged (-540 ms)
+- **Layer 2 outliers:** unchanged (one validator at -25.1 s)
+- **Foundation cluster:** unaffected (12 / 12 active throughout)
+
+Economic / governance change → neither layer. Framework correct.
+
+The dashboard captured both events with 1-hour resolution. See the
+[full case studies in the methodology](https://piowin-clo.github.io/X1-ClockDrift/docs/methodology.html#case-study-tachyon-v3).
 
 ## Architecture
 
@@ -166,7 +181,8 @@ Releases: <https://github.com/PioWin-clo/X1-ClockDrift/releases/latest>
 
 ## Version history
 
-- **v1.4.0** — Foundation chart outlier clamping + Tachyon v3.0.15 case study
+- **v1.5.0** — Active-validators filter (zombie exclusion) + Capybara delegation cleanup case study
+- v1.4.0 — Foundation chart outlier clamping + Tachyon v3.0.15 case study
 - v1.3.0 — Analytics widgets fixed (histogram bins, scatter axis, drift cluster filtering)
 - v1.2.0 — Adaptive chart aggregation + Polish methodology + README sync
 - v1.1.0 — Diagnostic snapshot widget + operator diagnostic flowchart
