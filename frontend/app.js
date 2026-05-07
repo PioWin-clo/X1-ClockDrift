@@ -68,6 +68,14 @@ const I18N = {
     badge_warning: '⚠️ WARNING',
     badge_anomaly: '🔴 ANOMALY',
 
+    // v1.7.1 — Strontium oracle overlay on ms-scale charts.
+    // {spread} / {conf} / {n} placeholders are filled at render time
+    // from state.strontium (avg_spread_ms, avg_confidence_pct, fleet_n,
+    // and the latest entry for the tooltip).
+    chart_strontium_ref_label: 'Strontium ref',
+    chart_strontium_legend_template: '🔬 Strontium active — spread: {spread}ms conf: {conf}%',
+    chart_strontium_tooltip_template: 'Strontium: spread {spread}ms | conf {conf}% | n={n}',
+
     // v1.0.0 Foundation trend — pipeline framing
     foundation_trend_title: 'X1 Labs foundation pipeline trend (14 days)',
     foundation_trend_help: 'Tracks pipeline latency for the 12-node X1 Labs foundation cluster. Shifts >100 ms in one bucket indicate X1 Labs changed something operationally — Tachyon config, NTP source, deployment, or load test. NOT clock drift (foundation clocks are tightly synchronized — identical signature across nodes proves this).',
@@ -317,6 +325,11 @@ const I18N = {
     badge_normal: '✅ NORMALNY',
     badge_warning: '⚠️ UWAGA',
     badge_anomaly: '🔴 ANOMALIA',
+
+    // v1.7.1 — overlay Strontium na wykresach ms-skalowych.
+    chart_strontium_ref_label: 'Strontium ref',
+    chart_strontium_legend_template: '🔬 Strontium aktywne — spread: {spread}ms conf: {conf}%',
+    chart_strontium_tooltip_template: 'Strontium: spread {spread}ms | conf {conf}% | n={n}',
 
     // v1.0.0 Trend fundacji — narracja pipeline
     foundation_trend_title: 'Trend pipeline fundacji X1 Labs (14 dni)',
@@ -576,6 +589,150 @@ const NORMAL_BAND_LOW_MS = BASELINE_MS - NORMAL_BAND_HALF_WIDTH_MS;   // -740
 const NORMAL_BAND_HIGH_MS = BASELINE_MS + NORMAL_BAND_HALF_WIDTH_MS;  // -340
 const BADGE_NORMAL_THRESHOLD_MS = 250;
 const BADGE_WARNING_THRESHOLD_MS = 500;
+
+// v1.7.1 — Strontium oracle overlay helpers, shared across the three
+// ms-scale charts (chart-history, chart-foundation-trend,
+// chart-scatter). Strontium measures NTP-consensus *quality*, not
+// pipeline lag values — so its spread/confidence numbers MUST NOT be
+// plotted on the pipeline-lag y-axis. Instead each chart gets:
+//
+//   1. A thin amber dashed line at y=0 with a "Strontium ref" label
+//      (signals that the oracle is active and measuring against the
+//      same time reference the chart is plotted against).
+//   2. A custom legend entry with current avg spread + confidence.
+//   3. A tooltip footer line with the freshest entry's numbers.
+//
+// All three are gated on `state.strontium && state.strontium.fleet_n
+// > 0`; when strontium.json is missing or empty the charts render
+// exactly as in v1.7.0 (graceful skip per NON-GOAL).
+
+const STRONTIUM_OVERLAY_COLOR = 'rgba(245, 158, 11, 0.4)';
+const STRONTIUM_LABEL_COLOR = 'rgba(245, 158, 11, 0.75)';
+
+function strontiumActive() {
+  const s = state.strontium;
+  return !!(s && typeof s.fleet_n === 'number' && s.fleet_n > 0);
+}
+
+// Returns the most recent entry (max utc) or null. Defensive about
+// ordering — strontium-to-json.sh writes most-recent-first today, but
+// any future producer change shouldn't silently flip the tooltip's
+// "latest" line to the oldest sample.
+function strontiumLatestEntry() {
+  const s = state.strontium;
+  if (!s || !Array.isArray(s.entries) || s.entries.length === 0) return null;
+  let best = s.entries[0];
+  for (const e of s.entries) {
+    if (e && typeof e.utc === 'string' && (!best || !best.utc || e.utc > best.utc)) {
+      best = e;
+    }
+  }
+  return best;
+}
+
+// Chart.js plugin factory: draws the amber dashed reference line at
+// y=0 on the named axis. afterDraw so it sits above the grid but below
+// the existing data series (data is drawn in datasetsDraw stage).
+function strontiumOverlayPlugin(yAxisId) {
+  return {
+    id: `strontiumOverlay__${yAxisId}`,
+    afterDraw(chart) {
+      if (!strontiumActive()) return;
+      const yScale = chart.scales[yAxisId];
+      const area = chart.chartArea;
+      if (!yScale || !area) return;
+      const y = yScale.getPixelForValue(0);
+      if (!isFinite(y) || y < area.top || y > area.bottom) return;
+      const ctx2d = chart.ctx;
+      ctx2d.save();
+      ctx2d.beginPath();
+      ctx2d.setLineDash([5, 3]);
+      ctx2d.strokeStyle = STRONTIUM_OVERLAY_COLOR;
+      ctx2d.lineWidth = 1;
+      ctx2d.moveTo(area.left, y);
+      ctx2d.lineTo(area.right, y);
+      ctx2d.stroke();
+      ctx2d.setLineDash([]);
+      const t = I18N[state.lang];
+      ctx2d.fillStyle = STRONTIUM_LABEL_COLOR;
+      ctx2d.font = '11px sans-serif';
+      ctx2d.textAlign = 'right';
+      ctx2d.textBaseline = 'top';
+      ctx2d.fillText(t.chart_strontium_ref_label, area.right - 6, y + 3);
+      ctx2d.restore();
+    },
+  };
+}
+
+// Returns a Chart.js LegendItem for the strontium row, or null when
+// no oracle data is available. Caller injects via
+// `legend.labels.generateLabels` so the row appears alongside (not
+// instead of) the auto-generated dataset entries.
+function strontiumLegendItem() {
+  if (!strontiumActive()) return null;
+  const s = state.strontium;
+  const t = I18N[state.lang];
+  const text = (t.chart_strontium_legend_template || '🔬 Strontium active — spread: {spread}ms conf: {conf}%')
+    .replace('{spread}', (s.avg_spread_ms || 0).toFixed(1))
+    .replace('{conf}', s.avg_confidence_pct || 0);
+  return {
+    text,
+    fillStyle: STRONTIUM_OVERLAY_COLOR,
+    strokeStyle: STRONTIUM_LABEL_COLOR,
+    lineWidth: 1,
+    lineDash: [5, 3],
+    fontColor: STRONTIUM_LABEL_COLOR,
+    hidden: false,
+    index: -1, // sentinel: not bound to any dataset
+  };
+}
+
+// Returns the tooltip footer line ("Strontium: spread Xms | conf Y% |
+// n=Z") or null when no data. Each chart's tooltip.callbacks.afterBody
+// pushes this onto the visible block.
+function strontiumTooltipLine() {
+  if (!strontiumActive()) return null;
+  const s = state.strontium;
+  const t = I18N[state.lang];
+  const latest = strontiumLatestEntry();
+  const spread = latest && typeof latest.spread_ms === 'number'
+    ? latest.spread_ms
+    : (s.avg_spread_ms || 0);
+  const conf = latest && typeof latest.confidence_pct === 'number'
+    ? latest.confidence_pct
+    : (s.avg_confidence_pct || 0);
+  const tmpl = t.chart_strontium_tooltip_template
+    || 'Strontium: spread {spread}ms | conf {conf}% | n={n}';
+  return tmpl
+    .replace('{spread}', typeof spread === 'number' ? spread.toFixed(0) : spread)
+    .replace('{conf}', conf)
+    .replace('{n}', s.fleet_n);
+}
+
+// Wraps a Chart.js `legend` config so the strontium row is appended
+// to the auto-generated dataset entries. Preserves any caller-provided
+// `labels` (color, font, etc.). Use as
+//   legend: withStrontiumLegend({ labels: { color: '#c9d1d9' } })
+function withStrontiumLegend(legend) {
+  const base = legend && typeof legend === 'object' ? legend : {};
+  const baseLabels = (base.labels && typeof base.labels === 'object') ? base.labels : {};
+  return {
+    ...base,
+    display: base.display !== false,
+    labels: {
+      ...baseLabels,
+      generateLabels(chart) {
+        // Mirror Chart.js's default for dataset entries, then append.
+        const def = window.Chart && window.Chart.defaults && window.Chart.defaults.plugins
+          && window.Chart.defaults.plugins.legend && window.Chart.defaults.plugins.legend.labels
+          && window.Chart.defaults.plugins.legend.labels.generateLabels;
+        const items = typeof def === 'function' ? def(chart) : [];
+        const extra = strontiumLegendItem();
+        return extra ? items.concat([extra]) : items;
+      },
+    },
+  };
+}
 
 // v1.5.0: active-validator threshold. Mirror of the daemon's
 // ACTIVE_VALIDATOR_MAX_SLOT_BEHIND constant — must stay in sync.
@@ -1540,12 +1697,21 @@ function renderHistoryChart() {
   // v0.7.0: y-axis scale config — explicit min/max only when clamping.
   // When showOutliers=true we let Chart.js auto-fit (natural range,
   // 60s spike will be visible).
+  // v1.7.1: y-axis title styled to match foundation-trend / scatter
+  // (slate-400 @ 0.7 alpha + 11 px). Was rendering with the default
+  // Chart.js title font size which was visually invisible on some
+  // viewport widths — the spec called this "missing y-axis label".
   const yLeftScale = {
     type: 'linear',
     position: 'left',
     ticks: { color: '#8b949e' },
     grid: { color: '#21262d' },
-    title: { display: true, text: t.chart_axis_drift_ms, color: '#8b949e' },
+    title: {
+      display: true,
+      text: t.chart_axis_drift_ms,
+      color: 'rgba(148, 163, 184, 0.7)',
+      font: { size: 11 },
+    },
   };
   if (yMin != null && yMax != null) {
     yLeftScale.min = yMin;
@@ -1616,12 +1782,15 @@ function renderHistoryChart() {
   chartHistory = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets },
-    plugins: [baselineAnnotations],
+    // v1.7.1: strontium overlay plugin appended after baselineAnnotations.
+    // Gated internally on `strontiumActive()`, so a missing strontium.json
+    // is a no-op. Y-axis id is the chart-specific 'yLeft' (not 'y').
+    plugins: [baselineAnnotations, strontiumOverlayPlugin('yLeft')],
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: '#c9d1d9' } },
+        legend: withStrontiumLegend({ labels: { color: '#c9d1d9' } }),
         tooltip: {
           mode: 'index',
           intersect: false,
@@ -1639,20 +1808,28 @@ function renderHistoryChart() {
             // Computed from the median series only (the most
             // representative network-wide signal); the deviation +
             // status are language-agnostic numbers + an i18n verdict.
+            // v1.7.1: append strontium-active footer line when oracle
+            // data is present (graceful skip otherwise).
             afterBody: (items) => {
               const medianItem = items.find((it) => it.dataset.label === t.chart_history_median);
-              if (!medianItem || medianItem.parsed.y == null) return null;
+              if (!medianItem || medianItem.parsed.y == null) {
+                const sLine = strontiumTooltipLine();
+                return sLine ? [sLine] : null;
+              }
               const deviation = Math.abs(medianItem.parsed.y - BASELINE_MS);
               const status = deviation < BADGE_NORMAL_THRESHOLD_MS
                 ? t.badge_normal
                 : deviation < BADGE_WARNING_THRESHOLD_MS
                   ? t.badge_warning
                   : t.badge_anomaly;
-              return [
+              const lines = [
                 `${t.chart_baseline_label} −540 ms`,
                 `${t.chart_deviation_label}: ${deviation.toFixed(0)} ms`,
                 `${t.chart_status_label}: ${status}`,
               ];
+              const sLine = strontiumTooltipLine();
+              if (sLine) lines.push(sLine);
+              return lines;
             },
           },
         },
@@ -1878,6 +2055,22 @@ function renderFoundationTrend() {
     return;
   }
   if (chartFoundationTrend) chartFoundationTrend.destroy();
+  // v1.7.1: extend the shared chart options with strontium overlay
+  // (legend row + tooltip footer). Plugin attaches to 'y' (the
+  // default axis id chartCommonOpts uses). Gated on strontiumActive()
+  // so a missing strontium.json is a no-op.
+  const ftOpts = chartCommonOpts({ yLabel: 'pipeline lag (ms)' });
+  ftOpts.plugins.legend = withStrontiumLegend(ftOpts.plugins.legend);
+  ftOpts.plugins.tooltip = {
+    ...(ftOpts.plugins.tooltip || {}),
+    callbacks: {
+      ...((ftOpts.plugins.tooltip && ftOpts.plugins.tooltip.callbacks) || {}),
+      afterBody: () => {
+        const line = strontiumTooltipLine();
+        return line ? [line] : null;
+      },
+    },
+  };
   chartFoundationTrend = new Chart(ctx, {
     type: 'line',
     data: {
@@ -1915,7 +2108,8 @@ function renderFoundationTrend() {
         },
       ],
     },
-    options: chartCommonOpts({ yLabel: 'pipeline lag (ms)' }),
+    plugins: [strontiumOverlayPlugin('y')],
+    options: ftOpts,
   });
 
   renderFoundationOutlierAlert(outliers);
@@ -2141,6 +2335,8 @@ function renderScatter() {
         },
       ],
     },
+    // v1.7.1: strontium overlay plugin (gated internally).
+    plugins: [strontiumOverlayPlugin('y')],
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -2152,7 +2348,20 @@ function renderScatter() {
         if (p && p.pubkey) openValidatorModal(p.raw);
       },
       plugins: {
-        legend: { display: false },
+        // v1.7.1: scatter legend was previously hidden — show only when
+        // strontium data is available, and surface ONLY the strontium
+        // row (filter out the data-series + trend-line entries to keep
+        // the chart visually unchanged when oracle is offline).
+        legend: {
+          display: strontiumActive(),
+          labels: {
+            color: '#c9d1d9',
+            generateLabels() {
+              const item = strontiumLegendItem();
+              return item ? [item] : [];
+            },
+          },
+        },
         tooltip: {
           callbacks: {
             label: (item) => {
@@ -2163,6 +2372,14 @@ function renderScatter() {
               const driftStr = `${p.y.toFixed(0)} ms`;
               const flag = p.is_foundation ? '  🏛️' : '';
               return `${pk}  ·  ${stakeStr}  ·  ${driftStr}${flag}`;
+            },
+            // v1.7.1: append strontium footer (when active) to every
+            // scatter tooltip — same line operators see on the other
+            // ms-scale charts so the cross-chart context stays consistent.
+            afterBody: (items) => {
+              if (!items || items.length === 0 || items[0].datasetIndex !== 0) return null;
+              const line = strontiumTooltipLine();
+              return line ? [line] : null;
             },
           },
         },
