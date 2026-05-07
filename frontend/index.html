@@ -67,6 +67,58 @@
     <p class="network-state-note" data-i18n-html="network_state_note_html">All charts and tables below show <strong>active validators only</strong>. Zombies excluded since 2026-05-06.</p>
   </section>
 
+  <!-- ===== v1.7.0: Strontium Oracle widget. Reads data/strontium.json,
+       which is produced by install/strontium-to-json.sh on Sentinel
+       (independent of the ClockDrift daemon). The whole section is
+       hidden via the `hidden` attribute when the JSON is missing or
+       fails to fetch — no error UX, no console noise. ============ -->
+  <section class="strontium-section" id="strontium-widget" hidden>
+    <div class="strontium-header">
+      <h2 class="section-title">
+        <span class="strontium-icon" aria-hidden="true">🕐</span>
+        <span data-i18n="strontium_title">X1 Strontium Oracle</span>
+      </h2>
+      <span class="strontium-fleet-badge" id="strontium-fleet-badge">—</span>
+    </div>
+    <div class="strontium-stats">
+      <div class="strontium-stat">
+        <span class="strontium-stat-label" data-i18n="strontium_last_ts">Last timestamp</span>
+        <span class="strontium-stat-value mono" id="strontium-last-ts">—</span>
+      </div>
+      <div class="strontium-stat">
+        <span class="strontium-stat-label" data-i18n="strontium_spread">Spread</span>
+        <span class="strontium-stat-value">
+          <span class="mono" id="strontium-spread-value">—</span>
+          <span class="strontium-bar" aria-hidden="true">
+            <span class="strontium-bar-fill" id="strontium-bar-fill" style="width: 0%"></span>
+          </span>
+          <span class="mono" id="strontium-bar-pct">—</span>
+        </span>
+      </div>
+      <div class="strontium-stat">
+        <span class="strontium-stat-label" data-i18n="strontium_confidence">Confidence</span>
+        <span class="strontium-stat-value mono" id="strontium-confidence">—</span>
+      </div>
+      <div class="strontium-stat">
+        <span class="strontium-stat-label" data-i18n="strontium_slot">Slot</span>
+        <span class="strontium-stat-value mono" id="strontium-slot">—</span>
+      </div>
+      <div class="strontium-stat">
+        <span class="strontium-stat-label" data-i18n="strontium_pda">Oracle PDA</span>
+        <span class="strontium-stat-value mono" id="strontium-pda" title="—">—</span>
+      </div>
+    </div>
+    <div class="strontium-history">
+      <div class="strontium-history-header">
+        <span class="strontium-history-label" data-i18n="strontium_history_label">24h history — spread sparkline</span>
+        <span class="strontium-history-count mono" id="strontium-history-count">—</span>
+      </div>
+      <svg class="strontium-sparkline" id="strontium-sparkline" viewBox="0 0 288 32" preserveAspectRatio="none" aria-hidden="true">
+        <path id="strontium-sparkline-path" d="" />
+      </svg>
+    </div>
+  </section>
+
   <!-- ===== HERO #2: validator pipeline health (v1.0.0 — Layer 1/2 bands) ===== -->
   <section class="hero hero-health">
     <h2 class="section-title" data-i18n="hero2_title">Validator pipeline health</h2>

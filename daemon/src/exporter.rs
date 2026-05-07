@@ -884,6 +884,32 @@ pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
         n_histories,
         "wrote JSON exports"
     );
+
+    // v1.7.0 — Strontium oracle widget. The `strontium.json` artifact
+    // is produced by `install/strontium-to-json.sh` (a separate
+    // cron-driven script on Sentinel), not by this daemon. It lands
+    // directly in `data_dir`, and `git_pusher::commit_and_push` does
+    // a wholesale `git add data/` on the next cycle, so no extra
+    // staging logic is needed here. We only log presence + age so
+    // operators can confirm via `journalctl -u x1cd | grep strontium`
+    // that the artifact is reaching the data branch alongside the
+    // other JSON. Missing file → silent skip (the frontend widget
+    // hides itself in that case).
+    let strontium_path = data_dir.join("strontium.json");
+    if let Ok(meta) = tokio::fs::metadata(&strontium_path).await {
+        let age_secs = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(-1);
+        tracing::info!(
+            size_bytes = meta.len(),
+            age_secs,
+            "strontium.json present, will be staged with the data branch"
+        );
+    }
+
     Ok(())
 }
 
