@@ -12,7 +12,7 @@
     <span class="brand-mark">x1</span>
     <span class="brand-name">ClockDrift</span>
   </div>
-  <div class="tagline" data-i18n-html="tagline">Live drift of <code>Clock::unix_timestamp</code> on the X1 blockchain.</div>
+  <div class="tagline" data-i18n-html="tagline">Time integrity monitor for the X1 blockchain — Layer 1 (vote pipeline) + Layer 2 (clock drift).</div>
   <div class="header-controls">
     <label class="filter-toggle">
       <input type="checkbox" id="hide-foundation">
@@ -201,8 +201,13 @@
       </label>
       <span class="chart-axis-note" id="chart-y-clamped-note" data-i18n="chart_y_clamped_note">Y-axis: ±5000 ms · ▲ marker = value exceeds range</span>
     </div>
-    <div class="chart-frame">
+    <div class="chart-frame chart-frame-with-badge">
       <canvas id="chart-history"></canvas>
+      <!-- v1.6.0 Bug #3: status badge overlay. Updated each render in
+           renderHistoryStatusBadge() based on the latest median bucket's
+           deviation from the −540 ms baseline. Hidden until first data
+           arrives (no false-NORMAL flicker on cold start). -->
+      <div class="chart-status-badge" id="chart-history-status-badge" hidden>—</div>
     </div>
     <div class="outlier-alert" id="network-outlier-alert" hidden>
       <div class="outlier-alert-title" data-i18n="network_outlier_alert_title">⚠️ Chain time anomalies detected:</div>
@@ -310,7 +315,7 @@
             <tr>
               <th data-i18n="col_rank">#</th>
               <th data-i18n="col_pubkey">pubkey</th>
-              <th class="num" data-i18n="col_drift">drift (ms)</th>
+              <th class="num" data-i18n="col_drift">lag (ms)</th>
               <th class="num" data-i18n="col_jitter">jitter (ms)</th>
               <th class="num" data-i18n="col_n">n</th>
               <th class="num" data-i18n="col_stake">stake (XNT)</th>

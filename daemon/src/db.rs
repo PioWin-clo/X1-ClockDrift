@@ -1260,12 +1260,22 @@ where
 /// v1.0.0 Layer 1/Layer 2 framework — see methodology.html for context.
 ///
 /// Tier 1: pipeline anomalies — slow vote pipeline, NOT clock drift.
-///   * `500 <= |mean_drift_ms| < 5000` — elevated latency but bounded;
-///     causes are network position, CPU saturation, geographic distance
-///     from leaders, suboptimal Tachyon config. Operator should
-///     investigate infra; not a chain-time threat.
-///   * `n_samples >= 20` — same statistical floor as the legacy worst
-///     ranking; we want early signal on infra issues.
+///   * `n_samples >= 20` — statistical floor; early signal on infra issues.
+///   * `severity != 'healthy'` (and NOT NULL) — v1.6.0 communication fix:
+///     a file named "anomalies" must not contain validators classified
+///     "healthy" by the same recompute pass. SQL `NULL != 'healthy'`
+///     evaluates to NULL → row excluded, which is the correct behaviour
+///     for low-sample validators with no severity yet.
+///   * `ABS(mean_drift_ms - BASELINE_MS) >= 200` — v1.6.0: deviation
+///     from the empirical foundation baseline (-540 ms), not from raw
+///     chain time. A validator at -700 ms is 160 ms from baseline =
+///     normal; a validator at -300 ms is 240 ms from baseline =
+///     anomaly. Replaces the old `|drift| >= 500` filter, which used
+///     "distance from zero" instead of "distance from baseline" and
+///     mis-classified ~half the foundation cluster as anomalous.
+///   * `|mean_drift_ms| < 5000` — Tier 1 vs Tier 2 split is the
+///     framework's empirical 5-second clock-drift threshold; stays
+///     locked per v1.6.0 NON-GOAL #3.
 pub async fn get_pipeline_anomalies(
     pool: &Pool,
     limit: i64,
@@ -1277,16 +1287,34 @@ pub async fn get_pipeline_anomalies(
                 is_foundation, foundation_label, severity \
          FROM validator_drift_summary \
          WHERE n_samples >= 20 \
-           AND ABS(mean_drift_ms) >= 500 \
+           AND severity IS NOT NULL \
+           AND severity != 'healthy' \
+           AND ABS(mean_drift_ms - ?1) >= ?2 \
            AND ABS(mean_drift_ms) < 5000 \
          ORDER BY ABS(mean_drift_ms) DESC \
-         LIMIT ?1",
+         LIMIT ?3",
     )
+    .bind(BASELINE_MS)
+    .bind(ANOMALY_MIN_DEVIATION_MS)
     .bind(limit)
     .fetch_all(pool)
     .await?;
     Ok(rows_to_summaries(rows))
 }
+
+/// v1.6.0 — empirical foundation baseline for the X1 vote pipeline,
+/// measured from the median of the 12-node X1 Labs foundation cluster.
+/// This is the centre of the "Normal range" green band on the network
+/// chart and the reference point against which Tier 1 pipeline
+/// anomalies are now measured (replacing the legacy "distance from
+/// zero" filter, which was a category error — pipeline lag of -540 ms
+/// is not a 540 ms problem, it's the protocol baseline).
+pub const BASELINE_MS: f64 = -540.0;
+/// v1.6.0 — width of the "Normal range" band around BASELINE_MS, both
+/// for the chart annotation and for the pipeline_anomalies.json
+/// inclusion filter. A validator must be >= 200 ms away from baseline
+/// in either direction to count as a Tier 1 anomaly.
+pub const ANOMALY_MIN_DEVIATION_MS: f64 = 200.0;
 
 /// v1.0.0 Layer 1/Layer 2 framework — see methodology.html for context.
 ///
@@ -2454,40 +2482,57 @@ mod tests {
     /// v1.0.0 Tier 1: pipeline anomalies — slow vote pipeline, NOT clock
     /// drift. Must include 500 ≤ |lag| < 5000 ms entries; must EXCLUDE
     /// |drift| ≥ 5000 ms (those go to Tier 2).
+    ///
+    /// v1.6.0 Bug #1 — also exercises the new two-condition filter:
+    ///   * `severity IS NOT NULL AND severity != 'healthy'`
+    ///   * `ABS(mean_drift_ms - BASELINE_MS) >= 200`
+    /// `near_baseline` is the canary for the new behaviour: it has
+    /// |mean| = 700 (would have passed the old `|drift| >= 500`
+    /// filter) but is only 160 ms from the −540 baseline AND its
+    /// severity is "healthy", so it must NOT appear in v1.6.0 output.
     #[tokio::test]
     async fn test_pipeline_anomalies_excludes_clock_drift_outliers() {
         let pool = init(":memory:").await.unwrap();
         let now = chrono::Utc::now().timestamp();
 
-        // (validator, n_samples, mean_drift_ms, stake_lamports)
+        // (validator, n_samples, mean_drift_ms, severity, stake_lamports)
         let rows = [
-            // Accepted Tier 1: -2s lag (slow pipeline / network / CPU)
-            ("slow_network", 100i64, -2000.0, 50_000_000_000i64),
-            // Rejected from Tier 1: -23s — Layer 2, belongs to Tier 2
-            ("clock_drift_op", 100, -23_000.0, 100_000_000_000_000),
-            // Rejected: |drift|=300 < 500 (healthy / normal pipeline)
-            ("healthy", 100, -300.0, 50_000_000_000_000),
+            // Accepted Tier 1: -2 s lag (slow pipeline / network / CPU)
+            ("slow_network",     100i64, -2000.0,  Some("high"),     50_000_000_000i64),
+            // Rejected from Tier 1: -23 s — Layer 2, belongs to Tier 2
+            ("clock_drift_op",   100,    -23_000.0, Some("critical"), 100_000_000_000_000),
+            // Rejected: |drift|=300 → healthy
+            ("healthy",          100,    -300.0,    Some("healthy"),  50_000_000_000_000),
             // Rejected: n=10 < 20 (statistical noise)
-            ("noisy_low_n", 10, -2000.0, 1_000_000_000),
-            // Accepted Tier 1: +1.2s
-            ("moderate_slow", 50, 1_200.0, 30_000_000_000_000),
+            ("noisy_low_n",      10,     -2000.0,   Some("high"),     1_000_000_000),
+            // Accepted Tier 1: +1.2 s
+            ("moderate_slow",    50,     1_200.0,   Some("high"),     30_000_000_000_000),
             // Boundary: |drift|=4999.9 just under 5000 → Tier 1
-            ("boundary_high", 50, 4_999.9, 1_000_000_000),
+            ("boundary_high",    50,     4_999.9,   Some("high"),     1_000_000_000),
             // Boundary: |drift|=5000.0 → Tier 2 (excluded from Tier 1)
-            ("boundary_layer2", 50, 5_000.0, 1_000_000_000),
+            ("boundary_layer2",  50,     5_000.0,   Some("high"),     1_000_000_000),
+            // v1.6.0: |mean|=700 (>500, would pass old filter) but only
+            // 160 ms from baseline AND severity="healthy" → must be
+            // excluded by the new filter.
+            ("near_baseline",    100,    -700.0,    Some("healthy"),  10_000_000_000_000),
+            // v1.6.0: severity NULL (low-confidence row from a tiny
+            // bucket) — must be excluded even if other thresholds pass.
+            ("severity_null",    50,     -2000.0,   None,             1_000_000_000),
         ];
-        for (v, n, mean, stake) in rows.iter() {
+        for (v, n, mean, severity, stake) in rows.iter() {
             sqlx::query(
                 "INSERT INTO validator_drift_summary \
                  (validator, n_samples, mean_drift_ms, median_drift_ms, stddev_drift_ms, \
-                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at) \
-                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5)",
+                  p10_drift_ms, p90_drift_ms, last_seen_slot, last_stake_lamports, updated_at, \
+                  severity) \
+                 VALUES (?1, ?2, ?3, ?3, 1.0, ?3, ?3, 0, ?4, ?5, ?6)",
             )
             .bind(*v)
             .bind(*n)
             .bind(*mean)
             .bind(*stake)
             .bind(now)
+            .bind(*severity)
             .execute(&pool)
             .await
             .unwrap();
@@ -2500,13 +2545,23 @@ mod tests {
             results.len(),
             3,
             "expected 3 (slow_network + moderate_slow + boundary_high); \
-             clock_drift_op (Tier 2) + healthy + noisy_low_n + boundary_layer2 filtered"
+             clock_drift_op (Tier 2), healthy, noisy_low_n, boundary_layer2, \
+             near_baseline (v1.6.0 baseline filter), severity_null (v1.6.0 NULL filter) \
+             all excluded"
         );
         assert!(pubkeys.contains(&"slow_network"));
         assert!(pubkeys.contains(&"moderate_slow"));
         assert!(pubkeys.contains(&"boundary_high"));
         assert!(!pubkeys.contains(&"clock_drift_op"));
         assert!(!pubkeys.contains(&"boundary_layer2"));
+        assert!(
+            !pubkeys.contains(&"near_baseline"),
+            "v1.6.0 Bug #1: -700 ms is 160 ms from baseline + severity=healthy, must be filtered"
+        );
+        assert!(
+            !pubkeys.contains(&"severity_null"),
+            "v1.6.0 Bug #1: severity NULL must be filtered (low-confidence row)"
+        );
         // Sorted by ABS(drift) DESC: 4999.9, 2000, 1200.
         assert_eq!(results[0].validator, "boundary_high");
         assert_eq!(results[1].validator, "slow_network");

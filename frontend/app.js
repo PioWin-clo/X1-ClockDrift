@@ -58,6 +58,16 @@ const I18N = {
     chart_y_clamped_note: 'Y-axis: ±5000 ms · ▲ marker = value exceeds range',
     chart_histogram_title: 'Validator pipeline lag distribution (all tracked)',
 
+    // v1.6.0 Bug #3 — baseline / normal-range / status-badge copy on
+    // the network-drift chart (annotations + tooltip footer + badge).
+    chart_normal_range_label: 'Normal range',
+    chart_baseline_label: 'Baseline',
+    chart_deviation_label: 'Deviation',
+    chart_status_label: 'Status',
+    badge_normal: '✅ NORMAL',
+    badge_warning: '⚠️ WARNING',
+    badge_anomaly: '🔴 ANOMALY',
+
     // v1.0.0 Foundation trend — pipeline framing
     foundation_trend_title: 'X1 Labs foundation pipeline trend (14 days)',
     foundation_trend_help: 'Tracks pipeline latency for the 12-node X1 Labs foundation cluster. Shifts >100 ms in one bucket indicate X1 Labs changed something operationally — Tachyon config, NTP source, deployment, or load test. NOT clock drift (foundation clocks are tightly synchronized — identical signature across nodes proves this).',
@@ -156,7 +166,7 @@ const I18N = {
     diagnostic_cta_suffix: ' for fix instructions.',
 
     foundation_table_title: '🏛️ X1 Labs Foundation',
-    foundation_table_help: 'Official X1 Labs infrastructure. Shown separately because their drift is operational baseline, not validator misconfiguration.',
+    foundation_table_help: 'Official X1 Labs infrastructure. Shown separately because their pipeline lag is operational baseline, not validator misconfiguration.',
 
     deeper_analytics: 'Deeper analytics',
     analytics_hint: 'distribution, correlation, signature groups',
@@ -165,8 +175,8 @@ const I18N = {
     histogram_subtitle: 'Most validators cluster in -800 to -400 ms range (Tachyon Layer 1 baseline). Bins outside this range indicate slow pipeline (amber) or genuine clock drift (red, Layer 2).',
 
     // v1.3.0 — drift clusters with operational floors
-    cluster_section_title: 'Identical-drift clusters',
-    cluster_section_subtitle: 'Validators sharing identical drift values. May indicate shared infrastructure, common hosting provider, or coordinated NTP source. Filtered to clusters with ≥ 100 XNT total stake to exclude testnet noise.',
+    cluster_section_title: 'Identical-lag clusters',
+    cluster_section_subtitle: 'Validators sharing identical pipeline-lag values. May indicate shared infrastructure, common hosting provider, or coordinated NTP source. Filtered to clusters with ≥ 100 XNT total stake to exclude testnet noise.',
     cluster_count_label: 'Detected clusters',
     cluster_validators_label: 'Validators in clusters',
     cluster_largest_label: 'Largest meaningful cluster',
@@ -178,22 +188,22 @@ const I18N = {
     // legacy keys — retained for backward compat with any external
     // consumers / older HTML snapshots; the v1.3.0 section uses the
     // cluster_* keys above.
-    signature_groups_title: 'Drift signature groups',
-    signature_groups_help: 'Validators sharing identical drift values. May indicate shared infrastructure or coincidental NTP setup. Not necessarily "farms".',
+    signature_groups_title: 'Pipeline-lag signature groups',
+    signature_groups_help: 'Validators sharing identical pipeline-lag values. May indicate shared infrastructure or coincidental NTP setup. Not necessarily "farms".',
     clusters_detected: 'Detected groups',
     cluster_validators: 'Validators in groups',
     largest_cluster: 'Largest group',
-    cluster_tooltip: (size) => `Part of ${size}-validator drift signature group`,
+    cluster_tooltip: (size) => `Part of ${size}-validator pipeline-lag signature group`,
     largest_cluster_value: (n, stake) => `${n} validators · ${stake} XNT`,
 
-    scatter_title: 'Stake vs drift correlation',
+    scatter_title: 'Stake vs pipeline-lag correlation',
     // v1.3.0 — replaces legacy scatter_help; tighter framing now that
     // the chart filters testnet noise and clamps Layer 2 outliers.
     scatter_subtitle: 'Each point = validator. Foundation nodes shown in blue. Validators with < 0.01 XNT excluded as testnet noise. Layer 2 outliers (drift < -5 s) clamped to chart edge.',
     scatter_legend: 'Validator',
     scatter_x_axis_label: 'Stake (XNT, log scale, ≥ 0.01 XNT only)',
     scatter_y_axis_label: 'Mean pipeline lag (ms)',
-    scatter_help: 'Each point is a validator. X-axis = stake (log scale). Y-axis = mean drift (ms). Cluster members share colour. Click a point for details.',
+    scatter_help: 'Each point is a validator. X-axis = stake (log scale). Y-axis = mean pipeline lag (ms). Cluster members share colour. Click a point for details.',
     scatter_correlation: 'Correlation',
     scatter_slope: 'Slope',
     scatter_slope_value: (slope) => `${slope.toFixed(0)} ms per 10× stake`,
@@ -206,7 +216,7 @@ const I18N = {
     clock_stratum_label: 'Stratum',
     clock_reference: 'Reference source',
     clock_skew_label: 'Frequency skew',
-    clock_help_text: "Sentinel's system clock is compared against a consensus of independent stratum-1 atomic time sources (PTB Germany, GUM Poland, CESNET Czechia, Netnod Sweden). All X1 chain drift measurements on this dashboard are referenced against this clock.",
+    clock_help_text: "Sentinel's system clock is compared against a consensus of independent stratum-1 atomic time sources (PTB Germany, GUM Poland, CESNET Czechia, Netnod Sweden). All X1 chain pipeline-lag measurements on this dashboard are referenced against this clock.",
 
     sources_section_title: 'NTP sources (chrony calibration)',
     sources_col_operator: 'Operator',
@@ -223,7 +233,7 @@ const I18N = {
     next_page: 'next',
     page_info: (p, t) => `page ${p} of ${t}`,
 
-    modal_mean: 'Mean drift',
+    modal_mean: 'Mean pipeline lag',
     modal_stake: 'Stake',
     modal_cluster: 'Cluster',
     modal_samples: 'Samples',
@@ -283,6 +293,16 @@ const I18N = {
     network_outlier_alert_title: '⚠️ Wykryto anomalie chain time:',
     chart_y_clamped_note: 'Oś Y: ±5000 ms · ▲ marker = wartość przekracza zakres',
     chart_histogram_title: 'Rozkład opóźnienia pipeline walidatorów (wszyscy śledzeni)',
+
+    // v1.6.0 Bug #3 — etykiety baseline / zakresu normalnego / badge’a
+    // na wykresie opóźnień sieci (annotacje + stopka tooltipu + badge).
+    chart_normal_range_label: 'Normalny zakres',
+    chart_baseline_label: 'Baseline',
+    chart_deviation_label: 'Odchylenie',
+    chart_status_label: 'Status',
+    badge_normal: '✅ NORMALNY',
+    badge_warning: '⚠️ UWAGA',
+    badge_anomaly: '🔴 ANOMALIA',
 
     // v1.0.0 Trend fundacji — narracja pipeline
     foundation_trend_title: 'Trend pipeline fundacji X1 Labs (14 dni)',
@@ -382,7 +402,7 @@ const I18N = {
     diagnostic_cta_suffix: ' z instrukcjami napraw.',
 
     foundation_table_title: '🏛️ X1 Labs Foundation',
-    foundation_table_help: 'Oficjalna infrastruktura X1 Labs. Pokazana osobno bo ich dryf jest baseline operacyjnym, nie błędem konfiguracji walidatora.',
+    foundation_table_help: 'Oficjalna infrastruktura X1 Labs. Pokazana osobno bo ich opóźnienie pipeline jest baseline operacyjnym, nie błędem konfiguracji walidatora.',
 
     deeper_analytics: 'Analityka szczegółowa',
     analytics_hint: 'rozkład, korelacja, grupy sygnatur',
@@ -391,8 +411,8 @@ const I18N = {
     histogram_subtitle: 'Większość walidatorów grupuje się w paśmie -800 do -400 ms (baseline Layer 1 Tachyon). Wartości poza tym pasmem oznaczają wolny pipeline (pomarańczowy) lub realny dryf zegara (czerwony, Layer 2).',
 
     // v1.3.0 — klastry dryfu z progami operacyjnymi
-    cluster_section_title: 'Klastry identycznego dryfu',
-    cluster_section_subtitle: 'Walidatorzy o identycznych wartościach dryfu. Może oznaczać wspólną infrastrukturę, tego samego hosting providera, lub skoordynowane źródło NTP. Filtrowane do klastrów z ≥ 100 XNT łącznego stake aby wykluczyć szum testnet.',
+    cluster_section_title: 'Klastry identycznego opóźnienia',
+    cluster_section_subtitle: 'Walidatorzy o identycznych wartościach opóźnienia pipeline. Może oznaczać wspólną infrastrukturę, tego samego hosting providera, lub skoordynowane źródło NTP. Filtrowane do klastrów z ≥ 100 XNT łącznego stake aby wykluczyć szum testnet.',
     cluster_count_label: 'Wykryte klastry',
     cluster_validators_label: 'Walidatorzy w klastrach',
     cluster_largest_label: 'Największy znaczący klaster',
@@ -402,22 +422,22 @@ const I18N = {
     cluster_noise_filtered_word: 'klastrów szumu odfiltrowanych',
 
     // legacy klucze — pozostawione dla zgodności z poprzednimi snapshotami
-    signature_groups_title: 'Grupy identycznego dryfu',
-    signature_groups_help: 'Walidatory dzielące identyczne wartości dryfu. Może oznaczać wspólną infrastrukturę lub przypadkowy zbieg NTP. Niekoniecznie „farmy".',
+    signature_groups_title: 'Grupy identycznego opóźnienia pipeline',
+    signature_groups_help: 'Walidatory dzielące identyczne wartości opóźnienia pipeline. Może oznaczać wspólną infrastrukturę lub przypadkowy zbieg NTP. Niekoniecznie „farmy".',
     clusters_detected: 'Wykryte grupy',
     cluster_validators: 'Walidatorzy w grupach',
     largest_cluster: 'Największa grupa',
     cluster_tooltip: (size) => `Część grupy ${size} walidatorów o identycznej sygnaturze`,
     largest_cluster_value: (n, stake) => `${n} walidatorów · ${stake} XNT`,
 
-    scatter_title: 'Korelacja stake vs dryf',
+    scatter_title: 'Korelacja stake vs opóźnienie pipeline',
     // v1.3.0 — zastępuje stare scatter_help po wprowadzeniu filtra
     // testnet i przycięcia outlierów Layer 2.
     scatter_subtitle: 'Każdy punkt = walidator. Nody fundacji niebieskie. Walidatory z < 0.01 XNT wykluczone jako szum testnet. Outlierzy Layer 2 (dryf < -5 s) przycięci do brzegu wykresu.',
     scatter_legend: 'Walidator',
     scatter_x_axis_label: 'Stake (XNT, skala log, tylko ≥ 0.01 XNT)',
     scatter_y_axis_label: 'Średnie opóźnienie pipeline (ms)',
-    scatter_help: 'Każdy punkt = walidator. Oś X = stake (skala log). Oś Y = średni dryf (ms). Walidatory w jednym klastrze mają ten sam kolor. Kliknij punkt po szczegóły.',
+    scatter_help: 'Każdy punkt = walidator. Oś X = stake (skala log). Oś Y = średnie opóźnienie pipeline (ms). Walidatory w jednym klastrze mają ten sam kolor. Kliknij punkt po szczegóły.',
     scatter_correlation: 'Korelacja',
     scatter_slope: 'Nachylenie',
     scatter_slope_value: (slope) => `${slope.toFixed(0)} ms na 10× stake`,
@@ -430,7 +450,7 @@ const I18N = {
     clock_stratum_label: 'Stratum',
     clock_reference: 'Źródło referencyjne',
     clock_skew_label: 'Skew częstotliwości',
-    clock_help_text: 'Zegar systemowy serwera Sentinel jest porównywany z konsensusem niezależnych źródeł czasu stratum-1 (PTB Niemcy, GUM Polska, CESNET Czechy, Netnod Szwecja). Wszystkie pomiary dryfu czasu X1 na tym dashboardzie są odniesione do tego zegara.',
+    clock_help_text: 'Zegar systemowy serwera Sentinel jest porównywany z konsensusem niezależnych źródeł czasu stratum-1 (PTB Niemcy, GUM Polska, CESNET Czechy, Netnod Szwecja). Wszystkie pomiary opóźnienia pipeline X1 na tym dashboardzie są odniesione do tego zegara.',
 
     sources_section_title: 'Źródła NTP (kalibracja chrony)',
     sources_col_operator: 'Operator',
@@ -447,7 +467,7 @@ const I18N = {
     next_page: 'następna',
     page_info: (p, t) => `strona ${p} z ${t}`,
 
-    modal_mean: 'Średni dryf',
+    modal_mean: 'Średnie opóźnienie pipeline',
     modal_stake: 'Stake',
     modal_cluster: 'Klaster',
     modal_samples: 'Próbki',
@@ -508,6 +528,25 @@ const state = {
 // outlier-alert div so operators still see real chain-time anomalies.
 const NETWORK_OUTLIER_THRESHOLD_MS = 5000;
 const VALID_WINDOW_DAYS = [2, 4, 6, 12];
+
+// v1.6.0 Bug #3 — empirical foundation baseline + "Normal range"
+// width. These constants are mirrored on the daemon side (BASELINE_MS
+// + ANOMALY_MIN_DEVIATION_MS in db.rs) and used here to draw the
+// reference frame on the network-drift chart so a validator looking
+// at a -744 ms reading doesn't panic without context.
+//
+// The band ([-740, -340]) tells the user "anything in here is normal
+// pipeline lag, not a clock problem". The dashed line at -540 marks
+// the foundation cluster's median. The badge thresholds add a 50 ms
+// hysteresis (250 ms inclusive vs the 200 ms band edge) so values
+// just outside the band don't immediately flip to "WARNING" — that
+// would cause exactly the false-alarm UX the spec is fixing.
+const BASELINE_MS = -540;
+const NORMAL_BAND_HALF_WIDTH_MS = 200;
+const NORMAL_BAND_LOW_MS = BASELINE_MS - NORMAL_BAND_HALF_WIDTH_MS;   // -740
+const NORMAL_BAND_HIGH_MS = BASELINE_MS + NORMAL_BAND_HALF_WIDTH_MS;  // -340
+const BADGE_NORMAL_THRESHOLD_MS = 250;
+const BADGE_WARNING_THRESHOLD_MS = 500;
 
 // v1.5.0: active-validator threshold. Mirror of the daemon's
 // ACTIVE_VALIDATOR_MAX_SLOT_BEHIND constant — must stay in sync.
@@ -645,6 +684,8 @@ function bindElements() {
   el.networkOutlierAlertList = document.getElementById('network-outlier-alert-list');
   // v1.2.0: dynamic chart subtitle (bucket-aggregation interval)
   el.chartHistorySubtitle = document.getElementById('chart-history-subtitle');
+  // v1.6.0 Bug #3: status badge overlay on the network-drift chart frame.
+  el.chartHistoryStatusBadge = document.getElementById('chart-history-status-badge');
   el.nClusters = document.getElementById('n-clusters');
   el.nClustered = document.getElementById('n-clustered');
   el.nClusteredPct = document.getElementById('n-clustered-pct');
@@ -1321,10 +1362,71 @@ function renderHistoryChart() {
     yLeftScale.max = yMax;
   }
 
+  // v1.6.0 Bug #3: baseline-context plugin. Draws a green "Normal
+  // range" band at [NORMAL_BAND_LOW_MS, NORMAL_BAND_HIGH_MS], a
+  // dashed reference line at BASELINE_MS, and right-edge labels for
+  // both. Runs in beforeDatasetsDraw so the data lines render on top.
+  // The plugin is rebuilt per render so the localised labels follow
+  // the current language; cheap because Chart.js caches scale data.
+  const tForPlugin = t;
+  const baselineAnnotations = {
+    id: 'baselineAnnotations',
+    beforeDatasetsDraw(chart) {
+      const yScale = chart.scales.yLeft;
+      const area = chart.chartArea;
+      if (!yScale || !area) return;
+      const yTop = yScale.getPixelForValue(NORMAL_BAND_HIGH_MS);
+      const yBottom = yScale.getPixelForValue(NORMAL_BAND_LOW_MS);
+      const yBase = yScale.getPixelForValue(BASELINE_MS);
+      const ctx2d = chart.ctx;
+      ctx2d.save();
+      // Clip to the chart area so the band and labels never bleed
+      // into the padding around the canvas.
+      ctx2d.beginPath();
+      ctx2d.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+      ctx2d.clip();
+      // Green band — only render the portion inside the visible y-range.
+      const bandTop = Math.max(area.top, Math.min(yTop, yBottom));
+      const bandBottom = Math.min(area.bottom, Math.max(yTop, yBottom));
+      if (bandBottom > bandTop) {
+        ctx2d.fillStyle = 'rgba(34, 197, 94, 0.13)';
+        ctx2d.fillRect(area.left, bandTop, area.right - area.left, bandBottom - bandTop);
+      }
+      // Dashed baseline.
+      if (yBase >= area.top && yBase <= area.bottom) {
+        ctx2d.beginPath();
+        ctx2d.setLineDash([6, 4]);
+        ctx2d.strokeStyle = 'rgba(148, 163, 184, 0.6)';
+        ctx2d.lineWidth = 1;
+        ctx2d.moveTo(area.left, yBase);
+        ctx2d.lineTo(area.right, yBase);
+        ctx2d.stroke();
+        ctx2d.setLineDash([]);
+        // Baseline label at right end. The minus sign is U+2212 to
+        // match the chart's negative-tick rendering.
+        ctx2d.fillStyle = 'rgba(148, 163, 184, 0.85)';
+        ctx2d.font = '11px sans-serif';
+        ctx2d.textAlign = 'right';
+        ctx2d.textBaseline = 'bottom';
+        ctx2d.fillText(`${tForPlugin.chart_baseline_label} −540 ms`, area.right - 6, yBase - 3);
+      }
+      // Normal-range label inside the band.
+      if (bandBottom > bandTop && bandBottom - bandTop > 16) {
+        ctx2d.fillStyle = 'rgba(34, 197, 94, 0.8)';
+        ctx2d.font = '11px sans-serif';
+        ctx2d.textAlign = 'right';
+        ctx2d.textBaseline = 'middle';
+        ctx2d.fillText(tForPlugin.chart_normal_range_label, area.right - 6, (bandTop + bandBottom) / 2);
+      }
+      ctx2d.restore();
+    },
+  };
+
   if (chartHistory) chartHistory.destroy();
   chartHistory = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets },
+    plugins: [baselineAnnotations],
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -1341,6 +1443,26 @@ function renderHistoryChart() {
               // 3 decimals lets it stay legible alongside X1 ms values.
               const decimals = item.dataset.label === sentinelLabel ? 3 : 1;
               return `${item.dataset.label}: ${v.toFixed(decimals)} ms`;
+            },
+            // v1.6.0 Bug #3: tooltip footer puts every hover in the
+            // same reference frame the band/baseline give visually.
+            // Computed from the median series only (the most
+            // representative network-wide signal); the deviation +
+            // status are language-agnostic numbers + an i18n verdict.
+            afterBody: (items) => {
+              const medianItem = items.find((it) => it.dataset.label === t.chart_history_median);
+              if (!medianItem || medianItem.parsed.y == null) return null;
+              const deviation = Math.abs(medianItem.parsed.y - BASELINE_MS);
+              const status = deviation < BADGE_NORMAL_THRESHOLD_MS
+                ? t.badge_normal
+                : deviation < BADGE_WARNING_THRESHOLD_MS
+                  ? t.badge_warning
+                  : t.badge_anomaly;
+              return [
+                `${t.chart_baseline_label} −540 ms`,
+                `${t.chart_deviation_label}: ${deviation.toFixed(0)} ms`,
+                `${t.chart_status_label}: ${status}`,
+              ];
             },
           },
         },
@@ -1367,6 +1489,50 @@ function renderHistoryChart() {
     el.chartHistorySubtitle.textContent =
       t.chart_history_subtitle_template.replace('{bucketLabel}', aggregation.label);
   }
+
+  // v1.6.0 Bug #3: status badge in the top-right corner of the chart
+  // frame. Reads the latest median bucket from the *unaggregated* full
+  // history (not the just-rendered aggregated `data`) so the badge
+  // tracks the freshest network state regardless of which window the
+  // user picked. This mirrors the diagnostic-snapshot widget's input
+  // for consistency between the two surfaces.
+  renderHistoryStatusBadge();
+}
+
+// v1.6.0 Bug #3: classify the most-recent network pipeline lag against
+// the foundation baseline and update the status badge overlay. NORMAL
+// uses an inclusive 250 ms threshold (50 ms wider than the green
+// band's 200 ms half-width) so values right at the band edge don't
+// flicker between NORMAL and WARNING.
+function renderHistoryStatusBadge() {
+  if (!el.chartHistoryStatusBadge) return;
+  const t = I18N[state.lang];
+  const all = Array.isArray(state.history) ? state.history : [];
+  const latest = all[all.length - 1];
+  const lagMs = latest && typeof latest.median_drift_ms === 'number'
+    ? latest.median_drift_ms
+    : null;
+  if (lagMs == null) {
+    el.chartHistoryStatusBadge.hidden = true;
+    return;
+  }
+  const deviation = Math.abs(lagMs - BASELINE_MS);
+  let label;
+  let cssClass;
+  if (deviation < BADGE_NORMAL_THRESHOLD_MS) {
+    label = t.badge_normal;
+    cssClass = 'badge-normal';
+  } else if (deviation < BADGE_WARNING_THRESHOLD_MS) {
+    label = t.badge_warning;
+    cssClass = 'badge-warning';
+  } else {
+    label = t.badge_anomaly;
+    cssClass = 'badge-anomaly';
+  }
+  el.chartHistoryStatusBadge.hidden = false;
+  el.chartHistoryStatusBadge.className =
+    `chart-status-badge ${cssClass}`;
+  el.chartHistoryStatusBadge.textContent = label;
 }
 
 // v0.7.0: render the "Chain time anomalies detected" panel below the
@@ -1559,7 +1725,7 @@ function renderFoundationTrend() {
         },
       ],
     },
-    options: chartCommonOpts({ yLabel: 'drift (ms)' }),
+    options: chartCommonOpts({ yLabel: 'pipeline lag (ms)' }),
   });
 
   renderFoundationOutlierAlert(outliers);
@@ -2308,12 +2474,12 @@ function renderModalChart(buckets) {
     data: {
       labels,
       datasets: [{
-        label: 'drift (ms)', data: drift,
+        label: 'pipeline lag (ms)', data: drift,
         borderColor: '#58a6ff', backgroundColor: 'transparent',
         pointRadius: 0, borderWidth: 1.5, tension: 0.2,
       }],
     },
-    options: chartCommonOpts({ yLabel: 'drift (ms)' }),
+    options: chartCommonOpts({ yLabel: 'pipeline lag (ms)' }),
   });
 }
 
