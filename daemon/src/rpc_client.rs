@@ -192,6 +192,28 @@ impl RpcClient {
         Ok(out)
     }
 
+    /// v1.5.1 — opt-in cross-check helper. Returns the size of the
+    /// `current` (active) array from `getVoteAccounts`. Cheaper than
+    /// `get_vote_accounts()` because we throw away the per-validator
+    /// fields immediately and only parse the two top-level array
+    /// lengths. The exporter compares this against its own
+    /// `active_validators` count and logs a WARN if the delta exceeds
+    /// 5 % — useful for spotting future Capybara-style cleanup events
+    /// or daemon classification drift.
+    pub async fn current_vote_account_count(&self) -> Result<usize, RpcError> {
+        let v = self
+            .raw_call("getVoteAccounts", json!([{ "commitment": COMMITMENT }]))
+            .await?;
+        let current_len = v
+            .get("current")
+            .and_then(|c| c.as_array())
+            .map(|a| a.len())
+            .ok_or_else(|| {
+                RpcError::Decode("getVoteAccounts: missing/non-array `current`".into())
+            })?;
+        Ok(current_len)
+    }
+
     /// Returns Ok(None) for skipped slots and unsupported txn versions; other
     /// errors propagate. Uses `jsonParsed` encoding so vote instructions arrive
     /// pre-decoded from the RPC. Uses `confirmed` commitment (v0.4.1) for

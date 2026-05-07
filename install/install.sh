@@ -139,6 +139,18 @@ watchdog_secs = 120
 stake_refresh_secs = 3600
 history_retention_days = 7
 frontend_dir = "$FRONTEND_DIR"
+
+# v1.5.1 — how many days of network drift history to backfill on cold
+# start. Lower = faster restart, less historical context. Default: 1 day.
+# Set to 0 to skip backfill entirely (history accumulates from now
+# forward). Raise to 7 only when rebuilding the database from scratch.
+backfill_lookback_days = 1
+
+# v1.5.1 — opt-in cross-check of `active_validators` against the X1
+# RPC's getVoteAccounts. When true, daemon logs a WARN if the daemon's
+# count and the RPC's `current.len()` differ by more than 5%. Default
+# false (no extra RPC traffic).
+validate_against_rpc = false
 TOML
 
 echo "==> Installing systemd unit (sudo required)"

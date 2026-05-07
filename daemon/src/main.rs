@@ -135,9 +135,10 @@ async fn run(config_path: &std::path::Path) -> Result<()> {
     {
         let pool_ex = pool.clone();
         let cfg_ex = cfg.clone();
+        let rpc_ex = rpc.clone();
         let s = shutdown.clone();
         handles.push(tokio::spawn(async move {
-            exporter::run(pool_ex, cfg_ex, s).await;
+            exporter::run(pool_ex, cfg_ex, rpc_ex, s).await;
         }));
     }
 

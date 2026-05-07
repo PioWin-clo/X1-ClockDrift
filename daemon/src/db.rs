@@ -226,7 +226,33 @@ pub async fn init(path: &str) -> Result<Pool> {
     }
     migrate_v3(&pool).await?;
     migrate_v4(&pool).await?;
+    migrate_v5(&pool).await?;
     Ok(pool)
+}
+
+/// v1.5.1 — performance index for the latest-stake-per-validator query
+/// that runs every export cycle. Without this composite index, the
+/// query plan does a full table scan + sort on stake_snap; with it,
+/// the planner uses the index for the GROUP BY MAX subquery and the
+/// outer JOIN both. On the production database (1.27 GB / ~5,800
+/// stake accounts) the query drops from ~1.0 s to ~21 ms (50× speedup),
+/// which removes the "WARN slow statement" log spam observed during
+/// the v1.5.0 deploy.
+///
+/// `IF NOT EXISTS` keeps it idempotent: Sentinel already had this
+/// index applied manually as a hotfix; daemon must not error on the
+/// second run. The trailing `ANALYZE stake_snap` makes sure the
+/// planner picks the new index up immediately on the very first
+/// export cycle, not after the next auto-analyze.
+async fn migrate_v5(pool: &Pool) -> Result<()> {
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_stake_snap_validator_ts \
+         ON stake_snap(validator, snapshot_ts DESC)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("ANALYZE stake_snap").execute(pool).await?;
+    Ok(())
 }
 
 /// One-time idempotent migration to add v0.3.0 columns to
@@ -1173,23 +1199,62 @@ pub async fn get_validator_history(
     Ok(out)
 }
 
-/// Backfill `network_drift_history` for every 5-minute bucket whose start
-/// is within `lookback_secs` seconds of now. Calls
-/// [`recompute_network_history_bucket`] for each, which is idempotent
-/// (`INSERT OR REPLACE`) and a no-op when a bucket has no underlying
-/// vote/slot_obs data. Cheap enough to run at every daemon start.
-pub async fn backfill_history(pool: &Pool, lookback_secs: i64) -> Result<usize> {
+/// Backfill `network_drift_history` for every 5-minute bucket whose
+/// start is within `lookback_secs` seconds of now, with cooperative
+/// cancellation and progress reporting. Calls
+/// [`recompute_network_history_bucket`] for each bucket, which is
+/// idempotent (`INSERT OR REPLACE`) and a no-op when a bucket has no
+/// underlying vote/slot_obs data.
+///
+/// Until v1.5.0 this ran synchronously inside the exporter (as a thin
+/// `backfill_history(pool, lookback)` wrapper without progress hooks)
+/// and blocked `summary.json` from being written for up to 90 minutes
+/// on a 1.27 GB database. v1.5.1 spawns it as a background tokio task
+/// while the exporter immediately starts publishing JSON, then uses
+/// the progress callback to emit periodic log lines and the
+/// `should_stop` callback to stop promptly when the daemon receives a
+/// shutdown signal.
+///
+/// * `progress(done, total)` is invoked between buckets — typically
+///   the exporter throttles its actual log emission to one line every
+///   ~10 buckets / 30 s.
+/// * `should_stop()` is polled between buckets so a `systemctl stop`
+///   doesn't have to wait for an entire 7-day backfill to finish.
+/// * After every five buckets we yield via `tokio::task::yield_now()`
+///   so the export cycle and other tasks aren't starved during cold
+///   start.
+pub async fn backfill_history_with_progress<P, S>(
+    pool: &Pool,
+    lookback_secs: i64,
+    mut progress: P,
+    mut should_stop: S,
+) -> Result<usize>
+where
+    P: FnMut(usize, usize),
+    S: FnMut() -> bool,
+{
     let now = chrono::Utc::now().timestamp();
     let earliest = now - lookback_secs;
-    let mut bucket = (earliest / 300) * 300;
-    let end = (now / 300) * 300;
-    let mut count = 0usize;
-    while bucket <= end {
+    let start_bucket = (earliest / 300) * 300;
+    let end_bucket = (now / 300) * 300;
+    let total = ((end_bucket - start_bucket) / 300 + 1).max(0) as usize;
+    let mut bucket = start_bucket;
+    let mut done = 0usize;
+    while bucket <= end_bucket {
+        if should_stop() {
+            break;
+        }
         recompute_network_history_bucket(pool, bucket).await?;
         bucket += 300;
-        count += 1;
+        done += 1;
+        progress(done, total);
+        // Cooperative scheduler yield — without this the tight loop
+        // can starve the exporter cycle on a fresh tokio runtime.
+        if done.is_multiple_of(5) {
+            tokio::task::yield_now().await;
+        }
     }
-    Ok(count)
+    Ok(done)
 }
 
 /// v1.0.0 Layer 1/Layer 2 framework — see methodology.html for context.

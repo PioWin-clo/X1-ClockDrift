@@ -15,9 +15,22 @@ RestartSec=30
 WatchdogSec=120
 TimeoutStopSec=30
 
-# Resource limits — validator gets absolute priority
-CPUQuota=20%
-MemoryMax=512M
+# Resource limits — validator still gets priority via Nice + idle I/O,
+# but cgroup ceilings are sized for the actual v1.5.x working set.
+#
+# v1.5.0 deploy on Sentinel (1.27 GB DB, ~1900 validators) revealed
+# that the original 512M / 20% caps wedged the daemon for ~90 minutes
+# during the cold-start backfill: kernel thrashed reclaiming pages mid-
+# transaction, and the 20% CPU cap throttled work that needed ~80%.
+#
+# Steady state:                      ~500 MB RAM, ~10 % CPU
+# Backfill (cold start, minutes):   ~1.7 GB RAM, ~80 % CPU
+# Tachyon-upgrade event spikes:     ~1.5 GB RAM (extra parser buffers)
+#
+# Nice=19 + IOSchedulingClass=idle keep the validator process the
+# scheduler-favoured peer on the host even when these ceilings are hit.
+CPUQuota=80%
+MemoryMax=2G
 Nice=19
 IOSchedulingClass=idle
 

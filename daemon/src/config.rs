@@ -27,6 +27,26 @@ pub struct Config {
 
     #[serde(default)]
     pub frontend_dir: Option<String>,
+
+    /// v1.5.1 — how many days of network drift history to backfill on
+    /// cold start. Default: 1 day (was 7 hardcoded in ≤v1.5.0).
+    /// Backfill is non-blocking from v1.5.1 onward — exporter publishes
+    /// `summary.json` immediately and fills history in the background —
+    /// but a tighter default still matters because backfill churns the
+    /// SQLite page cache and competes with the steady-state export
+    /// cycle for I/O. Set to 0 to skip backfill entirely; raise to 7
+    /// when rebuilding a database from scratch and depth is needed.
+    #[serde(default = "default_backfill_lookback_days")]
+    pub backfill_lookback_days: u32,
+
+    /// v1.5.1 — opt-in cross-validation against the X1 RPC's
+    /// `getVoteAccounts` response. When enabled, the daemon compares
+    /// its `active_validators` count against the RPC's `current.len()`
+    /// once per export cycle and logs a WARN if the delta exceeds 5%.
+    /// Default `false` (no extra RPC traffic). Useful for spotting
+    /// future Capybara-style cleanup events early.
+    #[serde(default)]
+    pub validate_against_rpc: bool,
 }
 
 fn default_stake_refresh_secs() -> u64 {
@@ -35,6 +55,10 @@ fn default_stake_refresh_secs() -> u64 {
 
 fn default_history_retention_days() -> u32 {
     7
+}
+
+fn default_backfill_lookback_days() -> u32 {
+    1
 }
 
 impl Config {
@@ -62,6 +86,17 @@ impl Config {
         }
         if !self.api_listen.contains(':') {
             anyhow::bail!("api_listen must be in HOST:PORT form");
+        }
+        // v1.5.1: backfill window cap. 7 days is the deliberate upper
+        // bound — anything beyond that is just churning the page cache
+        // for buckets the dashboard never displays (the network chart
+        // window selector tops out at 12 days but only 6 raw + 1 day
+        // aggregated visible buckets are useful in practice).
+        if self.backfill_lookback_days > 7 {
+            anyhow::bail!(
+                "backfill_lookback_days must be ≤ 7 (got {})",
+                self.backfill_lookback_days
+            );
         }
         Ok(())
     }
@@ -93,6 +128,37 @@ watchdog_secs = 120
         assert_eq!(cfg.export_interval_secs, 300);
         assert_eq!(cfg.stake_refresh_secs, 3600);
         assert_eq!(cfg.history_retention_days, 7);
+        // v1.5.1: defaults for the new operability fields.
+        assert_eq!(cfg.backfill_lookback_days, 1);
+        assert!(!cfg.validate_against_rpc);
+    }
+
+    /// v1.5.1: backfill window must not exceed 7 days. Catches a typo
+    /// that would otherwise force a 90-minute cold-start backfill on
+    /// every restart (which is exactly the v1.5.0 deploy bug).
+    #[test]
+    fn rejects_excessive_backfill() {
+        let cfg = Config {
+            log_path: "/x".into(),
+            rpc_url: "http://x".into(),
+            db_path: "/x".into(),
+            api_listen: "127.0.0.1:1".into(),
+            git_repo_path: "/x".into(),
+            git_remote_url: "x".into(),
+            git_deploy_key: "/x".into(),
+            git_branch: "data".into(),
+            export_interval_secs: 300,
+            rpc_rate_limit_per_sec: 5,
+            retention_days: 30,
+            kill_switch_path: "/x".into(),
+            watchdog_secs: 120,
+            stake_refresh_secs: 3600,
+            history_retention_days: 7,
+            frontend_dir: None,
+            backfill_lookback_days: 30,
+            validate_against_rpc: false,
+        };
+        assert!(cfg.validate().is_err());
     }
 
     #[test]
@@ -114,6 +180,8 @@ watchdog_secs = 120
             stake_refresh_secs: 3600,
             history_retention_days: 7,
             frontend_dir: None,
+            backfill_lookback_days: 1,
+            validate_against_rpc: false,
         };
         assert!(cfg.validate().is_err());
     }

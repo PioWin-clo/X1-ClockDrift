@@ -1,9 +1,11 @@
 use crate::chrony_reader;
 use crate::config::Config;
 use crate::db::{self, Pool};
+use crate::rpc_client::RpcClient;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// v0.5.0: bumped from 500 to 5000 to cover all ~2,259 active X1
@@ -44,23 +46,46 @@ const FOUNDATION_TREND_DAYS: u32 = 14;
 /// and `active_validators` so consumers can verify their own count.
 const ACTIVE_VALIDATOR_MAX_SLOT_BEHIND: i64 = 1000;
 const FOUNDATION_TREND_BUCKET_MINUTES: u32 = 60;
-const HISTORY_BACKFILL_SECS: i64 = 7 * 86400;
+/// v1.5.1 minimum gap between progress log lines emitted by the
+/// background backfill task. Keeps the journal readable on long
+/// backfills (7 days × 24 h × 12 buckets/h = ~2000 lines if we logged
+/// every bucket; with this cadence it's ≤ ~210 lines).
+const BACKFILL_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// v1.5.1: cross-validation tolerance. Daemon's `active_validators`
+/// count is allowed to differ from the X1 RPC's `getVoteAccounts`
+/// `current.len()` by up to this percentage before a WARN is logged.
+/// Empirically the v1.5.0 deploy showed 0.4 % delta against three
+/// independent counts (Jack Levin's terminal, `solana validators`,
+/// daemon) — 5 % is a generous ceiling that still flags real
+/// divergences.
+const RPC_CROSSCHECK_DELTA_PCT_WARN: f64 = 5.0;
 
-pub async fn run(pool: Pool, config: Config, shutdown: CancellationToken) {
-    tracing::info!(
-        lookback_days = HISTORY_BACKFILL_SECS / 86400,
-        "exporter backfilling network drift history"
-    );
-    match db::backfill_history(&pool, HISTORY_BACKFILL_SECS).await {
-        Ok(n) => tracing::info!(buckets = n, "backfill complete"),
-        Err(e) => {
-            tracing::warn!(error = %e, "history backfill failed");
-            let _ = db::record_error(&pool, "exporter", &format!("backfill: {e}")).await;
-        }
-    }
+pub async fn run(
+    pool: Pool,
+    config: Config,
+    rpc: Arc<RpcClient>,
+    shutdown: CancellationToken,
+) {
+    // v1.5.1 — non-blocking backfill. Pre-1.5.1 the daemon ran the
+    // network-drift-history backfill synchronously here and didn't
+    // reach the export loop until backfill completed (≈ 90 minutes on
+    // a production-sized database). Now we spawn it into the
+    // background and let the main loop publish `summary.json` on its
+    // very first iteration.
+    spawn_backfill(pool.clone(), &config, shutdown.clone());
 
     let interval = std::time::Duration::from_secs(config.export_interval_secs);
     tracing::info!(secs = config.export_interval_secs, "exporter starting");
+
+    // First cycle runs IMMEDIATELY (no leading sleep). This is what
+    // populates `summary.json` with the v1.5.0 fields
+    // (chain_max_slot, active_validators, observed_validators) right
+    // after a restart, instead of leaving the frontend showing
+    // em-dashes for ~5 minutes.
+    if let Err(e) = cycle(&pool, &config, &rpc).await {
+        tracing::warn!(error = %e, "export cycle outer error (first cycle)");
+        let _ = db::record_error(&pool, "exporter", &e.to_string()).await;
+    }
 
     loop {
         tokio::select! {
@@ -73,14 +98,102 @@ pub async fn run(pool: Pool, config: Config, shutdown: CancellationToken) {
         }
         // Cycle runs uninterrupted once started — shutdown can wait,
         // because aborting mid-write would risk a half-pushed git commit.
-        if let Err(e) = cycle(&pool, &config).await {
+        if let Err(e) = cycle(&pool, &config, &rpc).await {
             tracing::warn!(error = %e, "export cycle outer error");
             let _ = db::record_error(&pool, "exporter", &e.to_string()).await;
         }
     }
 }
 
-async fn cycle(pool: &Pool, config: &Config) -> Result<()> {
+/// v1.5.1 — kick off the network-drift-history backfill in the
+/// background. The original behaviour blocked the entire exporter on
+/// this work for up to 90 minutes; now it runs alongside the export
+/// cycles, yielding to the scheduler every five buckets and stopping
+/// promptly when the daemon receives a shutdown signal.
+///
+/// Logs:
+///   * `backfill: planning` once at startup with the estimated bucket
+///     count (5-min buckets across the configured lookback window).
+///   * `backfill: progress` every 30 s with done / total / pct /
+///     elapsed_secs, so an operator watching `journalctl -fu x1cd`
+///     can distinguish "still working" from "wedged".
+///   * `backfill: complete` (or `backfill: stopped` on shutdown / error)
+///     with total elapsed time so post-restart timing is observable.
+fn spawn_backfill(
+    pool: Pool,
+    config: &Config,
+    shutdown: CancellationToken,
+) {
+    let lookback_days = config.backfill_lookback_days;
+    if lookback_days == 0 {
+        tracing::info!("backfill skipped (backfill_lookback_days=0)");
+        return;
+    }
+    let lookback_secs = (lookback_days as i64) * 86_400;
+    let total_estimated_buckets = (lookback_secs / 300 + 1).max(0) as usize;
+    tracing::info!(
+        lookback_days,
+        total_estimated_buckets,
+        "backfill: planning"
+    );
+
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let mut last_progress_log = std::time::Instant::now();
+        let shutdown_for_cancel = shutdown.clone();
+        let result = db::backfill_history_with_progress(
+            &pool,
+            lookback_secs,
+            |done, total| {
+                if last_progress_log.elapsed() >= BACKFILL_PROGRESS_INTERVAL {
+                    let pct = if total > 0 {
+                        ((done as f64 / total as f64) * 100.0).round() as u32
+                    } else {
+                        100
+                    };
+                    tracing::info!(
+                        buckets_done = done,
+                        buckets_total = total,
+                        pct,
+                        elapsed_secs = started.elapsed().as_secs(),
+                        "backfill: progress"
+                    );
+                    last_progress_log = std::time::Instant::now();
+                }
+            },
+            move || shutdown_for_cancel.is_cancelled(),
+        )
+        .await;
+
+        let elapsed_secs = started.elapsed().as_secs();
+        match result {
+            Ok(n) if shutdown.is_cancelled() => {
+                tracing::info!(
+                    buckets_written = n,
+                    elapsed_secs,
+                    "backfill: stopped (shutdown signaled before completion)"
+                );
+            }
+            Ok(n) => {
+                tracing::info!(
+                    buckets_written = n,
+                    elapsed_secs,
+                    "backfill: complete"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    elapsed_secs,
+                    "backfill: failed (exporter continues with whatever history exists)"
+                );
+                let _ = db::record_error(&pool, "exporter", &format!("backfill: {e}")).await;
+            }
+        }
+    });
+}
+
+async fn cycle(pool: &Pool, config: &Config, rpc: &Arc<RpcClient>) -> Result<()> {
     if let Err(e) = db::recompute_validator_summaries(pool).await {
         tracing::warn!(error = %e, "recompute validator summaries");
         let _ = db::record_error(pool, "recompute_summaries", &e.to_string()).await;
@@ -96,6 +209,51 @@ async fn cycle(pool: &Pool, config: &Config) -> Result<()> {
     if let Err(e) = write_json_files(pool, Path::new(&config.git_repo_path)).await {
         tracing::warn!(error = %e, "write json files");
         let _ = db::record_error(pool, "write_json", &e.to_string()).await;
+    }
+
+    // v1.5.1 — opt-in cross-check against the X1 RPC. Disabled by
+    // default (no extra RPC traffic). When enabled, we re-read the
+    // freshly-written summary.json — same on-disk artifact every other
+    // consumer of this dashboard sees — so the comparison reflects
+    // exactly what the rest of the world reads, not an ephemeral
+    // in-memory value. Soft-fail on every error path: this is a
+    // diagnostic signal, not a correctness gate.
+    if config.validate_against_rpc {
+        let summary_path = Path::new(&config.git_repo_path).join("data/summary.json");
+        match (
+            read_active_validators_from_summary(&summary_path),
+            rpc.current_vote_account_count().await,
+        ) {
+            (Ok(daemon_active), Ok(rpc_active)) => {
+                let delta_pct = if rpc_active > 0 {
+                    ((daemon_active as f64 - rpc_active as f64).abs() / rpc_active as f64) * 100.0
+                } else {
+                    0.0
+                };
+                if delta_pct > RPC_CROSSCHECK_DELTA_PCT_WARN {
+                    tracing::warn!(
+                        daemon_active,
+                        rpc_active,
+                        delta_pct,
+                        "active_validators count diverges from getVoteAccounts by >{}%",
+                        RPC_CROSSCHECK_DELTA_PCT_WARN as i64
+                    );
+                } else {
+                    tracing::debug!(
+                        daemon_active,
+                        rpc_active,
+                        delta_pct,
+                        "active_validators cross-check passed"
+                    );
+                }
+            }
+            (Err(e), _) => {
+                tracing::debug!(error = %e, "cross-check skipped: cannot read summary.json");
+            }
+            (_, Err(e)) => {
+                tracing::debug!(error = %e, "cross-check skipped: getVoteAccounts failed");
+            }
+        }
     }
 
     if let Err(e) = crate::git_pusher::commit_and_push(config).await {
@@ -336,6 +494,28 @@ struct ChronyJson {
     wall_clock_utc: String,
     tracking: ChronyTrackingJson,
     sources: Vec<ChronySourceJson>,
+}
+
+/// v1.5.1 cross-check helper. Reads the freshly-written
+/// `data/summary.json` from the repo and pulls just the
+/// `active_validators` field so we can compare against the X1 RPC's
+/// `getVoteAccounts.current.len()`. Returns an error string rather
+/// than a typed error because the cross-check is a soft diagnostic —
+/// any failure (missing file, schema mismatch, decode error) just
+/// skips this cycle's check rather than stopping the daemon.
+fn read_active_validators_from_summary(path: &Path) -> Result<i64, String> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("parse {}: {}", path.display(), e))?;
+    v.get("active_validators")
+        .and_then(|x| x.as_i64())
+        .ok_or_else(|| {
+            format!(
+                "missing/non-i64 `active_validators` in {}",
+                path.display()
+            )
+        })
 }
 
 pub async fn write_json_files(pool: &Pool, repo_root: &Path) -> Result<()> {
