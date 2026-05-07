@@ -147,6 +147,20 @@ const I18N = {
     network_state_zombie: 'Zombie data',
     network_state_zombie_help: 'Stopped voting (likely Capybara cleanup)',
     network_state_note_html: 'All charts and tables below show <strong>active validators only</strong>. Zombies excluded since 2026-05-06.',
+
+    // v1.7.0 — Strontium Oracle widget (data/strontium.json, produced
+    // by install/strontium-to-json.sh on Sentinel). Strings are kept
+    // short to fit the compact panel layout.
+    strontium_title: 'X1 Strontium Oracle',
+    strontium_fleet_live: (n) => `live n=${n}`,
+    strontium_fleet_offline: 'offline',
+    strontium_last_ts: 'Last timestamp',
+    strontium_spread: 'Spread',
+    strontium_confidence: 'Confidence',
+    strontium_slot: 'Slot',
+    strontium_pda: 'Oracle PDA',
+    strontium_history_label: '24h history — spread sparkline',
+    strontium_history_count: (n) => `${n} points`,
     layer_1_label: 'Layer 1',
     layer_2_label: 'Layer 2',
     snapshot_pipeline_title: 'Vote pipeline latency',
@@ -383,6 +397,18 @@ const I18N = {
     network_state_zombie: 'Zombie data',
     network_state_zombie_help: 'Przestali głosować (prawdopodobnie Capybara cleanup)',
     network_state_note_html: 'Wszystkie wykresy i tabele poniżej pokazują <strong>tylko aktywnych walidatorów</strong>. Zombies wykluczone od 2026-05-06.',
+
+    // v1.7.0 — widget X1 Strontium Oracle
+    strontium_title: 'Oracle X1 Strontium',
+    strontium_fleet_live: (n) => `live n=${n}`,
+    strontium_fleet_offline: 'offline',
+    strontium_last_ts: 'Ostatni timestamp',
+    strontium_spread: 'Rozstęp',
+    strontium_confidence: 'Pewność',
+    strontium_slot: 'Slot',
+    strontium_pda: 'Oracle PDA',
+    strontium_history_label: 'Historia 24h — sparkline rozstępu',
+    strontium_history_count: (n) => `${n} punktów`,
     layer_1_label: 'Layer 1',
     layer_2_label: 'Layer 2',
     snapshot_pipeline_title: 'Opóźnienie pipeline głosowania',
@@ -522,6 +548,9 @@ const state = {
   activeValidatorCount: 0,
   observedValidatorCount: 0,
   zombieValidatorCount: 0,
+  // v1.7.0: Strontium oracle widget input — null when data/strontium.json
+  // is missing or fetch failed; renderStrontium() then hides the panel.
+  strontium: null,
 };
 // v0.7.0: y-axis hard cap when outliers are clamped. Anything above this
 // is rendered as a triangular marker on the chart edge + listed in the
@@ -654,6 +683,20 @@ function bindElements() {
   el.snapshotDriftWorst = document.getElementById('snapshot-drift-worst');
   // v1.5.0: Network state widget (active vs observed validator counts).
   el.networkActiveCount = document.getElementById('network-active-count');
+  // v1.7.0: Strontium widget DOM handles. All look-ups silently
+  // succeed even when the section is `hidden` — renderStrontium()
+  // gates display on state.strontium, not on element presence.
+  el.strontiumWidget = document.getElementById('strontium-widget');
+  el.strontiumFleetBadge = document.getElementById('strontium-fleet-badge');
+  el.strontiumLastTs = document.getElementById('strontium-last-ts');
+  el.strontiumSpreadValue = document.getElementById('strontium-spread-value');
+  el.strontiumBarFill = document.getElementById('strontium-bar-fill');
+  el.strontiumBarPct = document.getElementById('strontium-bar-pct');
+  el.strontiumConfidence = document.getElementById('strontium-confidence');
+  el.strontiumSlot = document.getElementById('strontium-slot');
+  el.strontiumPda = document.getElementById('strontium-pda');
+  el.strontiumHistoryCount = document.getElementById('strontium-history-count');
+  el.strontiumSparklinePath = document.getElementById('strontium-sparkline-path');
   el.networkObservedCount = document.getElementById('network-observed-count');
   el.networkZombieCount = document.getElementById('network-zombie-count');
   el.bestSyncedBody = document.getElementById('best-synced-body');
@@ -793,6 +836,7 @@ async function loadAll() {
       summary, validators, history, meta,
       best, pipelineAnomalies, clockDrift, worstLegacy,
       foundation, foundationTrend, chrony,
+      strontium,
     ] = await Promise.all([
       fetchJSON('data/summary.json'),
       fetchJSON('data/validators.json'),
@@ -805,6 +849,10 @@ async function loadAll() {
       fetchJSONOptional('data/foundation.json'),
       fetchJSONOptional('data/foundation_drift_trend.json'),
       fetchJSONOptional('data/chrony.json'),
+      // v1.7.0 — Strontium widget. Optional fetch; widget hides itself
+      // when the file is missing (e.g. when the strontium-to-json.sh
+      // cron isn't installed on this Sentinel).
+      fetchJSONOptional('data/strontium.json'),
     ]);
     state.summary = summary;
     state.validators = validators || [];
@@ -835,6 +883,10 @@ async function loadAll() {
     state.foundation = foundation || [];
     state.foundationTrend = foundationTrend || [];
     state.chrony = chrony;
+    // v1.7.0 — Strontium widget input. `null` means "fetch failed or
+    // file absent"; renderStrontium() hides the whole section in
+    // that case.
+    state.strontium = strontium;
     // v1.5.0: derive network-state counts. Prefer the daemon's
     // pre-computed numbers from summary.json (so the widget agrees
     // exactly with whatever the daemon's threshold produced); fall
@@ -895,6 +947,7 @@ function renderAll() {
   renderHeader();
   renderHero1();
   renderNetworkState();        // v1.5.0
+  renderStrontium();           // v1.7.0
   renderHero2();
   renderDiagnosticSnapshot();  // v1.1.0
   renderClock();
@@ -1112,6 +1165,143 @@ function renderNetworkState() {
   if (el.networkZombieCount) {
     el.networkZombieCount.textContent = formatInt(state.zombieValidatorCount || 0);
   }
+}
+
+// v1.7.0 — X1 Strontium Oracle widget. Reads `state.strontium` (loaded
+// from data/strontium.json by loadAll). The widget is hidden when:
+//   * the JSON wasn't on the data branch (cron not installed yet on
+//     this Sentinel) — fetchJSONOptional returned null, no error,
+//   * the JSON parsed but reports zero ring-buffer entries (e.g.
+//     fresh install before any oracle reads landed),
+//   * the structural shape is wrong (defensive — older/newer
+//     producer schema with missing required fields).
+// In all three cases the user sees no error UX, just no widget. By
+// design — the dashboard's primary signal is Layer 1/Layer 2 health,
+// the Strontium panel is auxiliary.
+const STRONTIUM_SPARKLINE_WIDTH = 288;
+const STRONTIUM_SPARKLINE_HEIGHT = 32;
+
+function renderStrontium() {
+  if (!el.strontiumWidget) return;
+  const data = state.strontium;
+  const entries = Array.isArray(data?.entries) ? data.entries : [];
+  if (!data || entries.length === 0) {
+    el.strontiumWidget.hidden = true;
+    return;
+  }
+  el.strontiumWidget.hidden = false;
+  const t = I18N[state.lang];
+
+  // Latest entry. The bash producer emits the table in `x1sr read`
+  // order (newest first by `#` index), so entries[0] is the freshest.
+  // We don't assume that — reduce by `slot` so the widget is robust
+  // to producer reordering.
+  const latest = entries.reduce(
+    (acc, e) => ((e.slot || 0) > (acc.slot || 0) ? e : acc),
+    entries[0],
+  );
+
+  // Fleet badge: "live n=2" when entries are present, with the count
+  // taken from the producer's footer when available (more reliable
+  // than entries.length on a partially-filled ring buffer).
+  const fleetN = typeof data.fleet_n === 'number' ? data.fleet_n : entries.length;
+  if (el.strontiumFleetBadge && typeof t.strontium_fleet_live === 'function') {
+    el.strontiumFleetBadge.textContent = t.strontium_fleet_live(fleetN);
+    el.strontiumFleetBadge.classList.remove('strontium-fleet-offline');
+    el.strontiumFleetBadge.classList.add('strontium-fleet-live');
+  }
+
+  // Last timestamp — show only HH:MM:SS UTC for compactness.
+  if (el.strontiumLastTs) {
+    const ts = typeof latest.utc === 'string' ? latest.utc : '';
+    const m = ts.match(/T(\d{2}:\d{2}:\d{2})/);
+    el.strontiumLastTs.textContent = m ? `${m[1]} UTC` : '—';
+  }
+
+  // Spread value + horizontal bar. Per the spec mockup, the bar
+  // visualises *confidence* (right-side percent) — spread number
+  // sits to the left of the bar. Confidence is already a 0..100
+  // value so it maps directly to width %.
+  const spread = typeof latest.spread_ms === 'number' ? latest.spread_ms : null;
+  const conf = typeof latest.confidence_pct === 'number' ? latest.confidence_pct : null;
+  if (el.strontiumSpreadValue) {
+    el.strontiumSpreadValue.textContent = spread != null ? `${spread} ms` : '—';
+  }
+  if (el.strontiumBarFill) {
+    const pct = conf != null ? Math.max(0, Math.min(100, conf)) : 0;
+    el.strontiumBarFill.style.width = `${pct}%`;
+  }
+  if (el.strontiumBarPct) {
+    el.strontiumBarPct.textContent = conf != null ? `${conf}%` : '—';
+  }
+  if (el.strontiumConfidence) {
+    el.strontiumConfidence.textContent = conf != null ? `${conf}%` : '—';
+  }
+
+  // Slot, formatted with thin-space thousands separator for legibility.
+  if (el.strontiumSlot) {
+    el.strontiumSlot.textContent = typeof latest.slot === 'number'
+      ? formatInt(latest.slot)
+      : '—';
+  }
+
+  // Oracle PDA — show first 12 chars + ellipsis to keep the panel
+  // narrow; full value goes in the title attribute for hover.
+  if (el.strontiumPda) {
+    const pda = typeof data.oracle_pda === 'string' ? data.oracle_pda : '';
+    if (pda) {
+      el.strontiumPda.textContent =
+        pda.length > 14 ? `${pda.slice(0, 12)}…` : pda;
+      el.strontiumPda.setAttribute('title', pda);
+    } else {
+      el.strontiumPda.textContent = '—';
+      el.strontiumPda.setAttribute('title', '—');
+    }
+  }
+
+  // Sparkline — spread over time. Order entries chronologically
+  // ascending (oldest left, newest right) regardless of producer order.
+  // Each point gets evenly-spaced x; y is normalised against the
+  // visible series' max so a flat line stays visible at the top of
+  // the strip rather than collapsing into the baseline.
+  const chrono = entries
+    .filter((e) => typeof e.spread_ms === 'number')
+    .slice()
+    .sort((a, b) => (a.slot || 0) - (b.slot || 0));
+  if (el.strontiumHistoryCount && typeof t.strontium_history_count === 'function') {
+    el.strontiumHistoryCount.textContent = t.strontium_history_count(chrono.length);
+  }
+  if (el.strontiumSparklinePath) {
+    el.strontiumSparklinePath.setAttribute('d', buildStrontiumSparklinePath(chrono));
+  }
+}
+
+// Build an SVG path command string for the strontium sparkline.
+// Returns an empty string when there are fewer than 2 points (a
+// single point can't form a polyline; CSS hides the empty path).
+function buildStrontiumSparklinePath(chrono) {
+  if (!Array.isArray(chrono) || chrono.length < 2) return '';
+  const W = STRONTIUM_SPARKLINE_WIDTH;
+  const H = STRONTIUM_SPARKLINE_HEIGHT;
+  const PAD = 2;
+  const innerH = H - PAD * 2;
+  const values = chrono.map((e) => e.spread_ms);
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  const span = hi - lo;
+  // Flat-line guard — when every point is identical, render a level
+  // line near the top half of the strip instead of dividing by zero.
+  const yFor = span > 0
+    ? (v) => PAD + innerH * (1 - (v - lo) / span)
+    : () => PAD + innerH * 0.5;
+  const stepX = chrono.length > 1 ? W / (chrono.length - 1) : 0;
+  let d = '';
+  chrono.forEach((e, i) => {
+    const x = i * stepX;
+    const y = yFor(e.spread_ms);
+    d += (i === 0 ? 'M' : ' L') + x.toFixed(2) + ',' + y.toFixed(2);
+  });
+  return d;
 }
 
 function renderClock() {
