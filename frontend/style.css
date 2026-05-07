@@ -114,6 +114,30 @@ code { font-family: var(--mono); background: var(--surface-2); padding: 1px 4px;
 }
 .chart-title { font-weight: 600; margin-bottom: 8px; }
 .chart-frame { height: 280px; }
+/* v1.6.0 Bug #3: chart-frame variant that hosts a status-badge
+   overlay (added to the network-drift chart only). `position: relative`
+   anchors the absolutely-positioned badge to this frame. */
+.chart-frame-with-badge { position: relative; }
+.chart-status-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+  z-index: 4;
+}
+.chart-status-badge[hidden] { display: none !important; }
+.chart-status-badge.badge-normal  { color: #22c55e; border-color: #22c55e; }
+.chart-status-badge.badge-warning { color: #f59e0b; border-color: #f59e0b; }
+.chart-status-badge.badge-anomaly { color: #ef4444; border-color: #ef4444; }
 
 .ranking-block {
   background: var(--surface);
