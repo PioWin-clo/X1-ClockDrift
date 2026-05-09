@@ -3,15 +3,30 @@
     "rank": 1,
     "vote_account": "9XcM7fbEfuYyP9furwo43nNcpzrYzmV93S57AEmVLr7w",
     "n_samples": 454,
-    "mean_drift_ms": -2768.4690893232037,
+    "mean_drift_ms": -2660.151404292573,
     "median_drift_ms": -542.37744140625,
-    "stddev_drift_ms": 7212.072374185187,
-    "p10_drift_ms": -975.82978515625,
+    "stddev_drift_ms": 7054.541871483867,
+    "p10_drift_ms": -974.2720947265625,
     "p90_drift_ms": -119.24660644531252,
     "stake_lamports": 418888260772890,
     "stake_xnt": 418888.26077289,
     "is_foundation": false,
     "foundation_label": null,
     "severity": "high"
+  },
+  {
+    "rank": 2,
+    "vote_account": "Hdcj25JfB7oPAwpCiedYRKUBYFBMGuw4GrQ9JZF5112",
+    "n_samples": 469,
+    "mean_drift_ms": -500.33137430870204,
+    "median_drift_ms": -491.9208984375,
+    "stddev_drift_ms": 322.72708220796403,
+    "p10_drift_ms": -917.59052734375,
+    "p90_drift_ms": -100.50922851562503,
+    "stake_lamports": 55379943062553638,
+    "stake_xnt": 55379943.06255364,
+    "is_foundation": true,
+    "foundation_label": "X1 Labs (node1)",
+    "severity": "healthy"
   }
 ]
