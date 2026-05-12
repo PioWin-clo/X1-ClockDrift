@@ -1,15 +1,5 @@
 [
   {
-    "bucket_ts": 1777980000,
-    "bucket_iso": "2026-05-05T11:20:00Z",
-    "median_drift_ms": -167.222900390625,
-    "mean_drift_ms": -180.6809666791552,
-    "stake_weighted_drift_ms": -169.12765285693095,
-    "sentinel_offset_us": 34.7633,
-    "n_validators": 1907,
-    "n_samples": 1908
-  },
-  {
     "bucket_ts": 1777980300,
     "bucket_iso": "2026-05-05T11:25:00Z",
     "median_drift_ms": -764.431884765625,
@@ -14385,8 +14375,18 @@
     "median_drift_ms": -9.8779296875,
     "mean_drift_ms": -311.13803280101104,
     "stake_weighted_drift_ms": -839.0662538755201,
-    "sentinel_offset_us": 17.696499999999997,
+    "sentinel_offset_us": 16.648699999999998,
     "n_validators": 679,
     "n_samples": 680
+  },
+  {
+    "bucket_ts": 1778584800,
+    "bucket_iso": "2026-05-12T11:20:00Z",
+    "median_drift_ms": -457.864013671875,
+    "mean_drift_ms": -453.1465030720729,
+    "stake_weighted_drift_ms": -457.6516743448714,
+    "sentinel_offset_us": 11.977571428571427,
+    "n_validators": 679,
+    "n_samples": 679
   }
 ]
