@@ -73,7 +73,18 @@ const I18N = {
     // from state.strontium (avg_spread_ms, avg_confidence_pct, fleet_n,
     // and the latest entry for the tooltip).
     chart_strontium_ref_label: 'Strontium ref',
-    chart_strontium_legend_template: '🔬 Strontium active — spread: {spread}ms conf: {conf}%',
+    // v1.7.2 Fix #4 — emoji prefix removed. Chart.js legend text is
+    // plain-text only and the previously-used 🔬 fell back to a tofu
+    // glyph on some font stacks (same root cause as the 🕐 → ⚪
+    // problem in the widget header). The widget header now carries
+    // the SVG brand cue; the legend caption is self-documenting.
+    chart_strontium_legend_template: 'Strontium active — spread: {spread}ms conf: {conf}%',
+
+    // v1.7.2 Fix #1/#2 — surfaced under chart-history and
+    // chart-foundation-trend when the user picks a window wider than
+    // the daemon currently retains. {days} is the actual span (one
+    // decimal place).
+    chart_history_fallback_hint: 'Showing all available history ({days} days).',
     chart_strontium_tooltip_template: 'Strontium: spread {spread}ms | conf {conf}% | n={n}',
 
     // v1.0.0 Foundation trend — pipeline framing
@@ -328,7 +339,10 @@ const I18N = {
 
     // v1.7.1 — overlay Strontium na wykresach ms-skalowych.
     chart_strontium_ref_label: 'Strontium ref',
-    chart_strontium_legend_template: '🔬 Strontium aktywne — spread: {spread}ms conf: {conf}%',
+    chart_strontium_legend_template: 'Strontium aktywne — spread: {spread}ms conf: {conf}%',
+
+    // v1.7.2 Fix #1/#2 — wskazówka rezerwowa.
+    chart_history_fallback_hint: 'Pokazuję całą dostępną historię ({days} dni).',
     chart_strontium_tooltip_template: 'Strontium: spread {spread}ms | conf {conf}% | n={n}',
 
     // v1.0.0 Trend fundacji — narracja pipeline
@@ -555,6 +569,11 @@ const state = {
   // doesn't squash the baseline line into a flat strip.
   networkDriftWindowDays: 6,
   showOutliers: false,
+  // v1.7.2 Fix #2 — foundation-trend window selector. Default 14 days
+  // (zero behavioral regression from v1.7.1). Persisted under its own
+  // localStorage key so the network-drift window and the foundation
+  // window can be tuned independently.
+  foundationTrendWindowDays: 14,
   // v1.5.0: active vs observed validator counts surfaced on the
   // Network state widget. Derived after every data fetch from
   // summary.json (fields published by the daemon at 1.5.0+).
@@ -569,7 +588,8 @@ const state = {
 // is rendered as a triangular marker on the chart edge + listed in the
 // outlier-alert div so operators still see real chain-time anomalies.
 const NETWORK_OUTLIER_THRESHOLD_MS = 5000;
-const VALID_WINDOW_DAYS = [2, 4, 6, 12];
+const VALID_WINDOW_DAYS = [2, 4, 6, 12, 30, 90];
+const FOUNDATION_VALID_WINDOW_DAYS = [7, 14, 30];
 
 // v1.6.0 Bug #3 — empirical foundation baseline + "Normal range"
 // width. These constants are mirrored on the daemon side (BASELINE_MS
@@ -672,7 +692,7 @@ function strontiumLegendItem() {
   if (!strontiumActive()) return null;
   const s = state.strontium;
   const t = I18N[state.lang];
-  const text = (t.chart_strontium_legend_template || '🔬 Strontium active — spread: {spread}ms conf: {conf}%')
+  const text = (t.chart_strontium_legend_template || 'Strontium active — spread: {spread}ms conf: {conf}%')
     .replace('{spread}', (s.avg_spread_ms || 0).toFixed(1))
     .replace('{conf}', s.avg_confidence_pct || 0);
   return {
@@ -765,10 +785,19 @@ function isActiveValidator(v, chainMaxSlot) {
 // the chart subtitle so users can tell what aggregation level they're
 // looking at.
 const BUCKET_AGGREGATION = {
-  2:  { sourceBuckets: 1, label: '5-min'  },  // 576 datapoints — raw
-  4:  { sourceBuckets: 2, label: '10-min' },  // 576 datapoints
-  6:  { sourceBuckets: 3, label: '15-min' },  // 576 datapoints
-  12: { sourceBuckets: 6, label: '30-min' },  // 576 datapoints
+  2:  { sourceBuckets: 1,  label: '5-min'  },  // 576 datapoints — raw
+  4:  { sourceBuckets: 2,  label: '10-min' },  // 576 datapoints
+  6:  { sourceBuckets: 3,  label: '15-min' },  // 576 datapoints
+  12: { sourceBuckets: 6,  label: '30-min' },  // 576 datapoints
+  // v1.7.2: long-window aggregation. 30d at 5-min raw = 8640 buckets,
+  // 90d = 25920. Grouped to keep the chart near the same ~600-point
+  // density as the shorter windows so line widths and outlier markers
+  // stay legible. Real history.json today carries 1-7 days, so these
+  // buckets effectively trigger the v1.7.2 fallback-hint path until
+  // the daemon's `backfill_lookback_days` is raised — at which point
+  // these levels just work.
+  30: { sourceBuckets: 12, label: '60-min' }, // 720 datapoints when full
+  90: { sourceBuckets: 36, label: '3 h'    }, // 720 datapoints when full
 };
 
 // v1.2.0: collapse `groupSize` consecutive raw buckets into one. Each
@@ -812,6 +841,82 @@ function aggregateBuckets(rawBuckets, groupSize) {
   }
   return out;
 }
+
+// v1.7.2 Fix #3 — adaptive X-axis tick density and per-window date
+// format. Both chart-history and chart-foundation-trend use Chart.js
+// category-axis labels (ISO strings); we reformat the visible ticks
+// without touching the underlying data so outlier-marker indices stay
+// aligned. Tooltip continues to show the full ISO from the dataset
+// title callback, so users can still copy precise times.
+const X_AXIS_TICK_RULES = {
+  2:  { maxTicks: 6,  format: 'time'      },
+  4:  { maxTicks: 6,  format: 'dayTime'   },
+  6:  { maxTicks: 7,  format: 'day'       },
+  7:  { maxTicks: 7,  format: 'day'       },
+  12: { maxTicks: 7,  format: 'day'       },
+  14: { maxTicks: 7,  format: 'day'       },
+  30: { maxTicks: 8,  format: 'day'       },
+  90: { maxTicks: 10, format: 'day'       },
+};
+function pad2(n) { return n < 10 ? `0${n}` : String(n); }
+function formatXAxisLabel(rawLabel, format) {
+  // Labels may be ISO ("2026-05-15T18:50:01.805Z") for chart-history
+  // or pre-stringified ("2026-05-15 18:50") for chart-foundation-trend.
+  // Date() parses both; fall back to the raw label if it doesn't.
+  const d = new Date(rawLabel);
+  if (Number.isNaN(d.getTime())) return rawLabel;
+  const mm = pad2(d.getUTCMonth() + 1);
+  const dd = pad2(d.getUTCDate());
+  const HH = pad2(d.getUTCHours());
+  const MM = pad2(d.getUTCMinutes());
+  switch (format) {
+    case 'time':    return `${HH}:${MM}`;
+    case 'dayTime': return `${mm}-${dd} ${HH}:${MM}`;
+    case 'day':     return `${mm}-${dd}`;
+    default:        return rawLabel;
+  }
+}
+function xAxisTicksForDays(days) {
+  const rule = X_AXIS_TICK_RULES[days] || X_AXIS_TICK_RULES[14];
+  return {
+    color: '#8b949e',
+    maxTicksLimit: rule.maxTicks,
+    autoSkip: true,
+    // `this.getLabelForValue(idx)` returns the original category label.
+    // Chart.js v4 binds `this` to the scale instance inside the callback.
+    callback(value) {
+      const label = typeof this.getLabelForValue === 'function'
+        ? this.getLabelForValue(value)
+        : value;
+      return formatXAxisLabel(label, rule.format);
+    },
+  };
+}
+
+// v1.7.2 Fix #5b — single Chart.js tooltip style used by every chart
+// on the dashboard. Background matches the dark surface tokens used
+// elsewhere (#0d1117-ish, alpha 0.95 so points behind the tooltip
+// remain faintly visible); border + radius match the panel chrome.
+const CHART_TOOLTIP_STYLE = {
+  backgroundColor: 'rgba(13, 17, 23, 0.95)',
+  titleColor: '#c9d1d9',
+  bodyColor: '#c9d1d9',
+  borderColor: 'rgba(48, 54, 61, 1)',
+  borderWidth: 1,
+  cornerRadius: 6,
+  padding: 10,
+  titleFont: { size: 12, weight: '600' },
+  bodyFont: { size: 12 },
+  footerFont: { size: 11, weight: '400' },
+};
+
+// v1.7.2 Fix #5a — Y-axis grace as a Chart.js option. `grace: '10%'`
+// pads the auto-fit range above max + below min by 10 % each, which
+// keeps data points off the chart-area edges. When a scale already
+// has explicit `min` / `max` set (e.g. chart-history under outlier
+// clamping, scatter at [-5000, 1000]), grace is ignored — that's the
+// correct behaviour; we only want padding when the range is free.
+const Y_AXIS_GRACE = '10%';
 
 const el = {};
 function bindElements() {
@@ -878,6 +983,11 @@ function bindElements() {
   el.worstMinStake = document.getElementById('worst-min-stake');
   // v0.7.0: network-drift chart controls
   el.windowButtons = Array.from(document.querySelectorAll('.window-btn'));
+  // v1.7.2 Fix #1 / Fix #2 — fallback hint paragraphs + foundation
+  // window selector buttons.
+  el.chartHistoryFallbackHint = document.getElementById('chart-history-fallback-hint');
+  el.foundationWindowButtons = Array.from(document.querySelectorAll('.foundation-window-btn'));
+  el.chartFoundationFallbackHint = document.getElementById('chart-foundation-fallback-hint');
   el.showOutliers = document.getElementById('show-outliers');
   el.chartYClampedNote = document.getElementById('chart-y-clamped-note');
   el.networkOutlierAlert = document.getElementById('network-outlier-alert');
@@ -937,6 +1047,12 @@ function initFilters() {
   state.showOutliers = localStorage.getItem('showOutliers') === '1';
   if (el.showOutliers) el.showOutliers.checked = state.showOutliers;
   syncWindowButtons();
+  // v1.7.2 Fix #2 — restore foundation-trend window from its own key.
+  const savedFoundationWindow = parseInt(localStorage.getItem('foundationTrendWindowDays') || '', 10);
+  state.foundationTrendWindowDays = FOUNDATION_VALID_WINDOW_DAYS.includes(savedFoundationWindow)
+    ? savedFoundationWindow
+    : 14;
+  syncFoundationWindowButtons();
 }
 
 // v0.7.0: visually mark the active window button (segmented control look).
@@ -945,6 +1061,15 @@ function syncWindowButtons() {
   el.windowButtons.forEach((btn) => {
     const days = parseInt(btn.dataset.windowDays || '', 10);
     btn.classList.toggle('active', days === state.networkDriftWindowDays);
+  });
+}
+
+// v1.7.2 Fix #2 — same pattern for the new foundation-trend toolbar.
+function syncFoundationWindowButtons() {
+  if (!Array.isArray(el.foundationWindowButtons)) return;
+  el.foundationWindowButtons.forEach((btn) => {
+    const days = parseInt(btn.dataset.foundationWindowDays || '', 10);
+    btn.classList.toggle('active', days === state.foundationTrendWindowDays);
   });
 }
 
@@ -1550,11 +1675,21 @@ function renderHistoryChart() {
   const all = Array.isArray(state.history) ? state.history : [];
   const days = state.networkDriftWindowDays || 6;
   let data = all;
+  let availableDays = 0;
   if (all.length > 0) {
     const latestTs = all[all.length - 1].bucket_ts || 0;
+    const earliestTs = all[0].bucket_ts || latestTs;
+    availableDays = Math.max(0, (latestTs - earliestTs) / 86400);
     const cutoffTs = latestTs - days * 86400;
     data = all.filter((d) => (d.bucket_ts || 0) >= cutoffTs);
   }
+
+  // v1.7.2 Fix #1 — fallback hint when the requested window exceeds
+  // what the daemon has accumulated so far. Threshold: requested days
+  // exceed available days by more than 10% (i.e. don't fire the hint
+  // on a fresh 30-day window that happens to be 29.6 days old).
+  const requestedExceedsAvailable = all.length > 0 && availableDays > 0 && days > availableDays * 1.1;
+  renderHistoryFallbackHint(requestedExceedsAvailable ? availableDays : null);
 
   // v1.2.0: client-side bucket aggregation. The wider the window, the
   // more raw 5-min buckets we'd render — at 12d that's 3456 datapoints
@@ -1792,9 +1927,17 @@ function renderHistoryChart() {
       plugins: {
         legend: withStrontiumLegend({ labels: { color: '#c9d1d9' } }),
         tooltip: {
+          ...CHART_TOOLTIP_STYLE,
           mode: 'index',
           intersect: false,
           callbacks: {
+            // v1.7.2 Fix #3 — tooltip title shows the full ISO label
+            // (Chart.js default for category axis is the abbreviated
+            // tick text, which would now lose seconds in 6d+ formats).
+            title: (items) => {
+              if (!items || items.length === 0) return '';
+              return items[0].label || '';
+            },
             label: (item) => {
               const v = item.parsed.y;
               if (v == null) return null;
@@ -1835,8 +1978,12 @@ function renderHistoryChart() {
         },
       },
       scales: {
-        x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
-        yLeft: yLeftScale,
+        // v1.7.2 Fix #3 — adaptive tick density + label format per
+        // selected window. Replaces the old fixed maxTicksLimit:8.
+        x: { ticks: xAxisTicksForDays(days), grid: { color: '#21262d' } },
+        // v1.7.2 Fix #5a — grace 10% only when the y range is
+        // auto-fitted (no explicit min/max from outlier clamping).
+        yLeft: { ...yLeftScale, grace: (yLeftScale.min == null && yLeftScale.max == null) ? Y_AXIS_GRACE : undefined },
       },
     },
   });
@@ -1902,6 +2049,31 @@ function renderHistoryStatusBadge() {
   el.chartHistoryStatusBadge.textContent = label;
 }
 
+// v1.7.2 Fix #1 / Fix #2 — show the "Showing all available history
+// (X days)" hint when the user requests a window larger than what's
+// in the history JSON. `daysAvailable === null` hides the hint
+// (window fits inside available data). Shared between chart-history
+// and chart-foundation-trend by passing the target element.
+function renderFallbackHint(el2, daysAvailable) {
+  if (!el2) return;
+  if (daysAvailable == null) {
+    el2.hidden = true;
+    el2.textContent = '';
+    return;
+  }
+  const t = I18N[state.lang];
+  const tmpl = t.chart_history_fallback_hint
+    || 'Showing all available history ({days} days).';
+  el2.hidden = false;
+  el2.textContent = tmpl.replace('{days}', daysAvailable.toFixed(1));
+}
+function renderHistoryFallbackHint(daysAvailable) {
+  renderFallbackHint(el.chartHistoryFallbackHint, daysAvailable);
+}
+function renderFoundationFallbackHint(daysAvailable) {
+  renderFallbackHint(el.chartFoundationFallbackHint, daysAvailable);
+}
+
 // v0.7.0: render the "Chain time anomalies detected" panel below the
 // chart. Pattern matches the existing #foundation-alert-card (yellow
 // border, hidden when 0 entries). One <li> per outlier bucket, sorted
@@ -1957,15 +2129,41 @@ let chartFoundationTrend = null;
 
 function renderFoundationTrend() {
   const sectionEl = document.getElementById('foundation-trend-section');
-  const data = state.foundationTrend || [];
-  if (data.length === 0) {
+  const allData = state.foundationTrend || [];
+  if (allData.length === 0) {
     if (sectionEl) sectionEl.style.display = 'none';
+    renderFoundationFallbackHint(null);
     return;
   }
   if (sectionEl) sectionEl.style.display = '';
 
+  // v1.7.2 Fix #2 — slice by selected window. bucket_ms is in
+  // milliseconds (foundation_drift_trend.json convention), so the
+  // cutoff math runs in ms.
+  //
+  // What stays on the FULL dataset (allData):
+  //   * "Current avg drift" stat card (already used `last`)
+  //   * 7-day delta stat card — operationally important to NOT shift
+  //     when the user clicks a window button
+  //   * "Largest single-bucket jump" alert card — same reasoning
+  //
+  // What follows the visible window (sliced `data`):
+  //   * chart datasets (avg/min/max lines)
+  //   * outlier-list panel below the chart (so listed timestamps
+  //     match spikes the user can see on the chart)
+  const windowDays = state.foundationTrendWindowDays || 14;
+  const latestBucketMs = allData[allData.length - 1].bucket_ms || 0;
+  const earliestBucketMs = allData[0].bucket_ms || latestBucketMs;
+  const availableDays = Math.max(0, (latestBucketMs - earliestBucketMs) / 86400000);
+  const cutoffBucketMs = latestBucketMs - windowDays * 86400000;
+  const requestedExceedsAvailable = availableDays > 0 && windowDays > availableDays * 1.1;
+  renderFoundationFallbackHint(requestedExceedsAvailable ? availableDays : null);
+  const data = requestedExceedsAvailable
+    ? allData
+    : allData.filter((d) => (d.bucket_ms || 0) >= cutoffBucketMs);
+
   const t = I18N[state.lang];
-  const last = data[data.length - 1];
+  const last = allData[allData.length - 1];
 
   document.getElementById('foundation-current-drift').textContent =
     formatMsRaw(last.avg_drift_ms) + ' ms';
@@ -1973,10 +2171,12 @@ function renderFoundationTrend() {
     `${last.nodes_active} / 12`;
 
   // 7d-ago bucket: nearest entry whose bucket_ms is within ±1h of target.
+  // v1.7.2 Fix #2: walks the FULL dataset so this long-term delta
+  // remains stable when the user toggles between 7d/14d/30d windows.
   const sevenDaysAgoTarget = last.bucket_ms - 7 * 86400 * 1000;
   let sevenDaysAgo = null;
   let bestDelta = Number.POSITIVE_INFINITY;
-  for (const b of data) {
+  for (const b of allData) {
     const delta = Math.abs(b.bucket_ms - sevenDaysAgoTarget);
     if (delta < bestDelta && delta <= 3600 * 1000) {
       bestDelta = delta;
@@ -1994,17 +2194,20 @@ function renderFoundationTrend() {
     changeEl.classList.remove('stat-warning');
   }
 
-  // Alert: largest single-bucket jump > threshold.
+  // Alert: largest single-bucket jump > threshold across the FULL
+  // retained history. v1.7.2 Fix #2 — pinning this to allData (not
+  // the visible window) keeps the alert card honest: a deployment
+  // event from 25 days ago is still flagged in the 7d window.
   let alert = null;
-  for (let i = 1; i < data.length; i++) {
-    const jump = Math.abs(data[i].avg_drift_ms - data[i - 1].avg_drift_ms);
+  for (let i = 1; i < allData.length; i++) {
+    const jump = Math.abs(allData[i].avg_drift_ms - allData[i - 1].avg_drift_ms);
     if (jump > FOUNDATION_JUMP_THRESHOLD_MS) {
       if (!alert || jump > alert.jump) {
         alert = {
-          bucket_ms: data[i].bucket_ms,
+          bucket_ms: allData[i].bucket_ms,
           jump,
-          prev: data[i - 1].avg_drift_ms,
-          curr: data[i].avg_drift_ms,
+          prev: allData[i - 1].avg_drift_ms,
+          curr: allData[i].avg_drift_ms,
         };
       }
     }
@@ -2059,18 +2262,33 @@ function renderFoundationTrend() {
   // (legend row + tooltip footer). Plugin attaches to 'y' (the
   // default axis id chartCommonOpts uses). Gated on strontiumActive()
   // so a missing strontium.json is a no-op.
+  // v1.7.2: also apply the unified tooltip style + adaptive x-ticks
+  // + y-axis grace 10% so this chart visually matches chart-history.
   const ftOpts = chartCommonOpts({ yLabel: 'pipeline lag (ms)' });
   ftOpts.plugins.legend = withStrontiumLegend(ftOpts.plugins.legend);
   ftOpts.plugins.tooltip = {
+    ...CHART_TOOLTIP_STYLE,
     ...(ftOpts.plugins.tooltip || {}),
     callbacks: {
       ...((ftOpts.plugins.tooltip && ftOpts.plugins.tooltip.callbacks) || {}),
+      // v1.7.2 Fix #3 — full ISO tooltip title regardless of the
+      // abbreviated tick text on the x-axis.
+      title: (items) => {
+        if (!items || items.length === 0) return '';
+        return items[0].label || '';
+      },
       afterBody: () => {
         const line = strontiumTooltipLine();
         return line ? [line] : null;
       },
     },
   };
+  // v1.7.2 Fix #3 — adaptive tick density for the foundation chart.
+  // chartCommonOpts defaults to maxTicksLimit:8; replace with the
+  // per-window rule keyed off the user's selected window.
+  ftOpts.scales.x.ticks = xAxisTicksForDays(windowDays);
+  // v1.7.2 Fix #5a — y-axis grace 10% (auto-ranged scale).
+  ftOpts.scales.y = { ...ftOpts.scales.y, grace: Y_AXIS_GRACE };
   chartFoundationTrend = new Chart(ctx, {
     type: 'line',
     data: {
@@ -2197,6 +2415,14 @@ function renderHistogram() {
   const borderColor = backgroundColor.map((c) => c.replace(/[\d.]+\)$/, '1)'));
 
   if (chartHistogram) chartHistogram.destroy();
+  // v1.7.2 Fix #5a + #5b — y-axis grace 10% + unified tooltip style.
+  // chart-histogram intentionally skips the strontium overlay
+  // (counts, not ms — different units, per v1.7.2 spec). X-axis is
+  // categorical (bin labels), not time-series — adaptive tick rules
+  // do not apply.
+  const histOpts = chartCommonOpts({ yLabel: 'validators' });
+  histOpts.plugins.tooltip = { ...CHART_TOOLTIP_STYLE, ...histOpts.plugins.tooltip };
+  histOpts.scales.y = { ...histOpts.scales.y, grace: Y_AXIS_GRACE };
   chartHistogram = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -2209,7 +2435,7 @@ function renderHistogram() {
         borderWidth: 1,
       }],
     },
-    options: chartCommonOpts({ yLabel: 'validators' }),
+    options: histOpts,
   });
 }
 
@@ -2363,6 +2589,7 @@ function renderScatter() {
           },
         },
         tooltip: {
+          ...CHART_TOOLTIP_STYLE,
           callbacks: {
             label: (item) => {
               if (item.datasetIndex !== 0) return null;
@@ -2937,6 +3164,21 @@ function wireEventHandlers() {
         localStorage.setItem('networkDriftWindowDays', String(days));
         syncWindowButtons();
         renderHistoryChart();
+      });
+    });
+  }
+  // v1.7.2 Fix #2 — foundation-trend window selector. Same pattern,
+  // separate localStorage key + button set. Hits renderFoundationTrend
+  // directly (cheap; the chart destroys+rebuilds in one call).
+  if (Array.isArray(el.foundationWindowButtons)) {
+    el.foundationWindowButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const days = parseInt(btn.dataset.foundationWindowDays || '', 10);
+        if (!FOUNDATION_VALID_WINDOW_DAYS.includes(days)) return;
+        state.foundationTrendWindowDays = days;
+        localStorage.setItem('foundationTrendWindowDays', String(days));
+        syncFoundationWindowButtons();
+        renderFoundationTrend();
       });
     });
   }

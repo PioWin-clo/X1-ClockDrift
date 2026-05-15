@@ -75,7 +75,21 @@
   <section class="strontium-section" id="strontium-widget" hidden>
     <div class="strontium-header">
       <h2 class="section-title">
-        <span class="strontium-icon" aria-hidden="true">🕐</span>
+        <!-- v1.7.2 Fix #4: inline SVG clock replaces the 🕐 emoji. The
+             emoji fell back to ⚪ (gray circle) on font stacks without
+             a color-emoji font for U+1F550 — visible on the deployed
+             dashboard. SVG inherits text colour via currentColor, so
+             it renders deterministically across Chrome/Firefox/mobile
+             and follows the dashboard theme automatically. -->
+        <svg class="strontium-icon" viewBox="0 0 24 24" fill="none"
+             xmlns="http://www.w3.org/2000/svg" role="img"
+             aria-label="Strontium Oracle">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
+          <!-- Hour hand pointing to 1 o'clock (matching the 🕐 it replaces). -->
+          <line x1="12" y1="12" x2="14.5" y2="8.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <!-- Minute hand pointing to 12. -->
+          <line x1="12" y1="12" x2="12" y2="6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
         <span data-i18n="strontium_title">X1 Strontium Oracle</span>
       </h2>
       <span class="strontium-fleet-badge" id="strontium-fleet-badge">—</span>
@@ -246,6 +260,11 @@
         <button type="button" class="window-btn" data-window-days="4" data-i18n="network_window_4d">4d</button>
         <button type="button" class="window-btn" data-window-days="6" data-i18n="network_window_6d">6d</button>
         <button type="button" class="window-btn" data-window-days="12" data-i18n="network_window_12d">12d</button>
+        <!-- v1.7.2 Fix #1: long-window buttons. Daemon currently retains
+             1-7 days, so these typically trigger the fallback hint
+             rendered below the chart frame. -->
+        <button type="button" class="window-btn" data-window-days="30">30d</button>
+        <button type="button" class="window-btn" data-window-days="90">90d</button>
       </div>
       <label class="filter-toggle">
         <input type="checkbox" id="show-outliers">
@@ -265,6 +284,9 @@
       <div class="outlier-alert-title" data-i18n="network_outlier_alert_title">⚠️ Chain time anomalies detected:</div>
       <ul class="outlier-alert-list" id="network-outlier-alert-list"></ul>
     </div>
+    <!-- v1.7.2 Fix #1: surfaced when user picks 30d/90d but the
+         daemon retains less. Populated by renderHistoryFallbackHint. -->
+    <p class="chart-fallback-hint" id="chart-history-fallback-hint" hidden></p>
   </section>
 
   <!-- ===== Foundation pipeline trend (14d/1h) — v1.0.0 framing ===== -->
@@ -289,6 +311,16 @@
         <span class="stat-value mono" id="foundation-alert-value">—</span>
       </div>
     </div>
+    <!-- v1.7.2 Fix #2: foundation-trend window selector. Same
+         .window-selector / .window-btn pattern as chart-history so
+         CSS + active-state styling are reused with no new tokens. -->
+    <div class="chart-controls">
+      <div class="window-selector" role="group" aria-label="Foundation window">
+        <button type="button" class="window-btn foundation-window-btn" data-foundation-window-days="7">7d</button>
+        <button type="button" class="window-btn foundation-window-btn" data-foundation-window-days="14">14d</button>
+        <button type="button" class="window-btn foundation-window-btn" data-foundation-window-days="30">30d</button>
+      </div>
+    </div>
     <div class="chart-frame">
       <canvas id="chart-foundation-trend"></canvas>
     </div>
@@ -300,6 +332,8 @@
       <ul class="outlier-alert-list" id="foundation-outlier-list"></ul>
       <p class="outlier-hint" data-i18n="foundation_outlier_hint">Spikes &gt;5 s typically indicate node restarts (Tachyon updates, deployments, infrastructure changes). Values clamped at ±5000 ms; actual values listed above.</p>
     </div>
+    <!-- v1.7.2 Fix #2: fallback hint when 30d window exceeds retained data. -->
+    <p class="chart-fallback-hint" id="chart-foundation-fallback-hint" hidden></p>
   </section>
 
   <!-- ===== ANOMALIES & DEVIATIONS — split into Tier 1 + Tier 2 (v1.0.0) ===== -->

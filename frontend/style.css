@@ -1101,7 +1101,17 @@ table.foundation-table tr:hover td { background: var(--surface-2); }
   font-size: 15px;
   font-weight: 700;
 }
-.strontium-icon { font-size: 18px; }
+/* v1.7.2 Fix #4 — strontium-icon was a span carrying an emoji; now it
+   is an inline SVG. `currentColor` on the SVG strokes inherits the
+   surrounding text colour so the icon picks up h2 / muted text styles
+   automatically. Sized in `em` so it scales with the heading font. */
+.strontium-icon {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.18em;
+  color: var(--accent);
+}
 .strontium-fleet-badge {
   margin-left: auto;
   font-family: var(--mono);
@@ -1440,3 +1450,51 @@ table.foundation-table tr:hover td { background: var(--surface-2); }
   font-weight: 600;
 }
 .diagnostic-cta a:hover { color: var(--text); border-bottom-color: var(--text); }
+
+/* v1.7.2 Fix #1/#2 — "Showing all available history (X days)." hint.
+   Subtle muted text right under the relevant chart frame; hidden by
+   the JS render helper when the requested window fits inside the
+   retained data. */
+.chart-fallback-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+.chart-fallback-hint[hidden] { display: none !important; }
+
+/* v1.7.2 Fix #1 — let the chart-history window selector wrap to a
+   second row on narrow viewports (was 4 buttons; now 6 including
+   30d / 90d). flex-wrap on the parent and on the segmented control
+   itself, never horizontal-scroll. */
+.window-selector {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+/* v1.7.2 Fix #5c — mobile-viewport polish. Chart legends shrink
+   their font and wrap freely instead of stretching the panel
+   beyond the viewport. The breakpoint matches the existing mobile
+   media query elsewhere in the stylesheet (most panels collapse
+   to single-column below ~600 px). */
+@media (max-width: 600px) {
+  .chart-controls {
+    gap: 8px;
+  }
+  .window-selector .window-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  /* Chart.js renders the legend inside the canvas, so we can't
+     style its text directly — but we can give the chart frame
+     enough breathing room that the legend wraps cleanly. */
+  .chart-frame { height: 260px; }
+  .foundation-trend-section .chart-frame { height: 300px; }
+  .scatter-section .chart-frame { height: 320px; }
+  /* DOM-rendered controls and helper text shrink in proportion. */
+  .chart-fallback-hint,
+  .section-help,
+  .chart-axis-note {
+    font-size: 11px;
+  }
+}
