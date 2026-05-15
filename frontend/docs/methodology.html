@@ -425,11 +425,12 @@
       fix it by configuring chrony correctly with stratum-1 NTP sources.
     </p>
     <p>
-      <strong>Note:</strong> the Strontium oracle (a separate X1 Labs
-      project) corrects <code>Clock::unix_timestamp</code> at protocol
-      level so chain consumers see correct UTC time even when individual
-      validators drift. This dashboard observes the raw measurement before
-      that correction.
+      <strong>Note:</strong> X1 Strontium &mdash; an independent time
+      oracle on X1 mainnet &mdash; corrects
+      <code>Clock::unix_timestamp</code> at the protocol level, so
+      chain consumers see correct UTC time even when individual
+      validators drift. This dashboard observes the raw measurement
+      before that correction.
     </p>
   </div>
   <div lang="pl">
@@ -449,11 +450,12 @@
       stratum-1.
     </p>
     <p>
-      <strong>Uwaga:</strong> Strontium oracle (osobny projekt X1 Labs)
-      koryguje <code>Clock::unix_timestamp</code> na poziomie protokołu,
-      więc konsumenci chain widzą poprawny czas UTC nawet gdy
-      poszczególne walidatory dryfują. Ten dashboard obserwuje surowy
-      pomiar przed tą korekcją.
+      <strong>Uwaga:</strong> X1 Strontium &mdash; niezależny oracle
+      czasu na mainnecie X1 &mdash; koryguje
+      <code>Clock::unix_timestamp</code> na poziomie protokołu, więc
+      konsumenci chain widzą poprawny czas UTC nawet gdy poszczególne
+      walidatory dryfują. Ten dashboard obserwuje surowy pomiar przed
+      tą korekcją.
     </p>
   </div>
 
@@ -1440,7 +1442,7 @@ pool pool.ntp.org iburst maxsources 4</code></pre>
     <h2>References</h2>
     <ul>
       <li>Theo (X1 Labs) on pipeline vs drift — personal communication, X1 Labs Telegram</li>
-      <li>Strontium oracle (Layer 2 protocol-level fix) — X1 Labs project, separate repository</li>
+      <li>X1 Strontium oracle (Layer 2 protocol-level fix) — independent open-source project, separate repository</li>
       <li>Solana vote consensus mechanics: <a href="https://docs.solana.com/consensus" target="_blank" rel="noreferrer noopener">https://docs.solana.com/consensus</a></li>
       <li>chrony documentation: <a href="https://chrony-project.org/" target="_blank" rel="noreferrer noopener">https://chrony-project.org/</a></li>
       <li>This dashboard source: <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener">github.com/PioWin-clo/X1-ClockDrift</a></li>
@@ -1450,7 +1452,7 @@ pool pool.ntp.org iburst maxsources 4</code></pre>
     <h2>Referencje</h2>
     <ul>
       <li>Theo (X1 Labs) o pipeline vs dryf — osobista korespondencja, X1 Labs Telegram</li>
-      <li>Strontium oracle (korekcja Layer 2 na poziomie protokołu) — projekt X1 Labs, osobne repozytorium</li>
+      <li>X1 Strontium oracle (korekcja Layer 2 na poziomie protokołu) — niezależny projekt open-source, osobne repozytorium</li>
       <li>Mechanika konsensusu vote w Solanie: <a href="https://docs.solana.com/consensus" target="_blank" rel="noreferrer noopener">https://docs.solana.com/consensus</a></li>
       <li>Dokumentacja chrony: <a href="https://chrony-project.org/" target="_blank" rel="noreferrer noopener">https://chrony-project.org/</a></li>
       <li>Źródło tego dashboardu: <a href="https://github.com/PioWin-clo/X1-ClockDrift" target="_blank" rel="noreferrer noopener">github.com/PioWin-clo/X1-ClockDrift</a></li>
