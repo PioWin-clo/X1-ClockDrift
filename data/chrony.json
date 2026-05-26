@@ -1,5 +1,5 @@
 {
-  "wall_clock_utc": "2026-05-26T01:31:35.000Z",
+  "wall_clock_utc": "2026-05-26T01:38:08.000Z",
   "tracking": {
     "stratum": 2,
     "reference_id": "C292FB66",
@@ -7,16 +7,16 @@
     "reference_hostname": "tempus3.gum.gov.pl",
     "reference_operator": "GUM",
     "reference_country_code": "PL",
-    "system_offset_us": -5,
-    "last_offset_us": -899,
-    "rms_offset_us": 899,
-    "frequency_ppm": 7.426,
-    "skew_ppm": 0.013,
-    "root_delay_ms": 2.781821,
-    "root_dispersion_ms": 1.108143,
-    "update_interval_secs": 1.0,
+    "system_offset_us": 36,
+    "last_offset_us": -31,
+    "rms_offset_us": 28,
+    "frequency_ppm": 8.064,
+    "skew_ppm": 0.489,
+    "root_delay_ms": 2.331943,
+    "root_dispersion_ms": 1.243816,
+    "update_interval_secs": 32.5,
     "leap_status": "Normal",
-    "updated_at_utc": "2026-05-26T01:31:33Z"
+    "updated_at_utc": "2026-05-26T01:38:06Z"
   },
   "sources": [
     {
@@ -29,9 +29,9 @@
       "state": "combined",
       "state_label_en": "✓ combined",
       "state_label_pl": "✓ łączone",
-      "offset_us": 171,
-      "last_rx_secs": 9,
-      "reach_octal": "17"
+      "offset_us": -90,
+      "last_rx_secs": 30,
+      "reach_octal": "377"
     },
     {
       "ip": "194.146.251.101",
@@ -43,9 +43,9 @@
       "state": "combined",
       "state_label_en": "✓ combined",
       "state_label_pl": "✓ łączone",
-      "offset_us": 150,
-      "last_rx_secs": 9,
-      "reach_octal": "17"
+      "offset_us": -153,
+      "last_rx_secs": 12,
+      "reach_octal": "377"
     },
     {
       "ip": "194.146.251.102",
@@ -57,9 +57,9 @@
       "state": "current_best",
       "state_label_en": "★ primary",
       "state_label_pl": "★ główne",
-      "offset_us": -3,
-      "last_rx_secs": 8,
-      "reach_octal": "17"
+      "offset_us": -100,
+      "last_rx_secs": 12,
+      "reach_octal": "377"
     },
     {
       "ip": "192.53.103.103",
@@ -71,9 +71,9 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": 3186,
-      "last_rx_secs": 8,
-      "reach_octal": "17"
+      "offset_us": 3148,
+      "last_rx_secs": 12,
+      "reach_octal": "377"
     },
     {
       "ip": "192.53.103.104",
@@ -85,9 +85,9 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": 3610,
-      "last_rx_secs": 8,
-      "reach_octal": "17"
+      "offset_us": 3092,
+      "last_rx_secs": 29,
+      "reach_octal": "377"
     },
     {
       "ip": "192.53.103.108",
@@ -99,9 +99,9 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": 3490,
-      "last_rx_secs": 8,
-      "reach_octal": "17"
+      "offset_us": 3112,
+      "last_rx_secs": 28,
+      "reach_octal": "377"
     },
     {
       "ip": "194.58.202.148",
@@ -113,9 +113,9 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": 132,
-      "last_rx_secs": 7,
-      "reach_octal": "17"
+      "offset_us": 111,
+      "last_rx_secs": 27,
+      "reach_octal": "377"
     },
     {
       "ip": "194.58.202.20",
@@ -127,9 +127,9 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": -12,
-      "last_rx_secs": 7,
-      "reach_octal": "17"
+      "offset_us": -54,
+      "last_rx_secs": 10,
+      "reach_octal": "377"
     },
     {
       "ip": "195.113.144.201",
@@ -141,9 +141,9 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": -14,
-      "last_rx_secs": 8,
-      "reach_octal": "17"
+      "offset_us": 16,
+      "last_rx_secs": 27,
+      "reach_octal": "377"
     },
     {
       "ip": "195.113.144.238",
@@ -155,9 +155,9 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": -51,
-      "last_rx_secs": 7,
-      "reach_octal": "17"
+      "offset_us": -117,
+      "last_rx_secs": 27,
+      "reach_octal": "377"
     }
   ]
 }
