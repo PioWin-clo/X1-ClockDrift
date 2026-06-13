@@ -9425,8 +9425,18 @@
     "median_drift_ms": -569.33203125,
     "mean_drift_ms": -565.5117551185344,
     "stake_weighted_drift_ms": -570.767343428519,
-    "sentinel_offset_us": 1.0576666666666668,
+    "sentinel_offset_us": -0.9882,
     "n_validators": 724,
     "n_samples": 725
+  },
+  {
+    "bucket_ts": 1781388600,
+    "bucket_iso": "2026-06-13T22:10:00Z",
+    "median_drift_ms": -455.85205078125,
+    "mean_drift_ms": -463.6577475080819,
+    "stake_weighted_drift_ms": -469.1216500018618,
+    "sentinel_offset_us": 3.1176250000000003,
+    "n_validators": 724,
+    "n_samples": 1450
   }
 ]
