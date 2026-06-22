@@ -1,5 +1,5 @@
 {
-  "wall_clock_utc": "2026-06-22T07:19:45.000Z",
+  "wall_clock_utc": "2026-06-22T07:25:57.000Z",
   "tracking": {
     "stratum": 2,
     "reference_id": "C292FB64",
@@ -7,16 +7,16 @@
     "reference_hostname": "tempus1.gum.gov.pl",
     "reference_operator": "GUM",
     "reference_country_code": "PL",
-    "system_offset_us": 5,
-    "last_offset_us": -16,
-    "rms_offset_us": 12,
-    "frequency_ppm": 3.969,
-    "skew_ppm": 0.011,
-    "root_delay_ms": 2.298981,
-    "root_dispersion_ms": 1.193092,
-    "update_interval_secs": 257.0,
+    "system_offset_us": 24,
+    "last_offset_us": -28,
+    "rms_offset_us": 14,
+    "frequency_ppm": 3.968,
+    "skew_ppm": 0.012,
+    "root_delay_ms": 2.339155,
+    "root_dispersion_ms": 1.2822,
+    "update_interval_secs": 259.2,
     "leap_status": "Normal",
-    "updated_at_utc": "2026-06-22T07:19:44Z"
+    "updated_at_utc": "2026-06-22T07:25:46Z"
   },
   "sources": [
     {
@@ -29,8 +29,8 @@
       "state": "current_best",
       "state_label_en": "★ primary",
       "state_label_pl": "★ główne",
-      "offset_us": -168,
-      "last_rx_secs": 111,
+      "offset_us": -113,
+      "last_rx_secs": 213,
       "reach_octal": "377"
     },
     {
@@ -43,8 +43,8 @@
       "state": "combined",
       "state_label_en": "✓ combined",
       "state_label_pl": "✓ łączone",
-      "offset_us": -296,
-      "last_rx_secs": 189,
+      "offset_us": -172,
+      "last_rx_secs": 34,
       "reach_octal": "377"
     },
     {
@@ -57,8 +57,8 @@
       "state": "combined",
       "state_label_en": "✓ combined",
       "state_label_pl": "✓ łączone",
-      "offset_us": 4,
-      "last_rx_secs": 108,
+      "offset_us": -150,
+      "last_rx_secs": 213,
       "reach_octal": "377"
     },
     {
@@ -71,8 +71,8 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": 3394,
-      "last_rx_secs": 213,
+      "offset_us": 3358,
+      "last_rx_secs": 58,
       "reach_octal": "377"
     },
     {
@@ -85,8 +85,8 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": 3035,
-      "last_rx_secs": 251,
+      "offset_us": 3026,
+      "last_rx_secs": 94,
       "reach_octal": "377"
     },
     {
@@ -99,8 +99,8 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": 3075,
-      "last_rx_secs": 231,
+      "offset_us": 3442,
+      "last_rx_secs": 78,
       "reach_octal": "377"
     },
     {
@@ -113,8 +113,8 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": -73,
-      "last_rx_secs": 71,
+      "offset_us": -165,
+      "last_rx_secs": 176,
       "reach_octal": "377"
     },
     {
@@ -127,8 +127,8 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": 215,
-      "last_rx_secs": 22,
+      "offset_us": -284,
+      "last_rx_secs": 127,
       "reach_octal": "377"
     },
     {
@@ -141,8 +141,8 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": -317,
-      "last_rx_secs": 214,
+      "offset_us": -41,
+      "last_rx_secs": 58,
       "reach_octal": "377"
     },
     {
@@ -155,8 +155,8 @@
       "state": "excluded",
       "state_label_en": "○ excluded",
       "state_label_pl": "○ wykluczone",
-      "offset_us": -464,
-      "last_rx_secs": 253,
+      "offset_us": -78,
+      "last_rx_secs": 100,
       "reach_octal": "377"
     }
   ]
