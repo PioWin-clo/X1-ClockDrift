@@ -1,21 +1,12 @@
 [
   {
-    "bucket_ms": 1781024400000,
-    "avg_drift_ms": -294.162109375,
-    "min_drift_ms": -294.162109375,
-    "max_drift_ms": -294.162109375,
-    "stddev_drift_ms": 0.0,
-    "nodes_active": 12,
-    "n_samples": 12
-  },
-  {
     "bucket_ms": 1781028000000,
-    "avg_drift_ms": -592.1176201000549,
+    "avg_drift_ms": -578.6937075014467,
     "min_drift_ms": -1032.93310546875,
     "max_drift_ms": -32.93310546875,
-    "stddev_drift_ms": 301.7487551914631,
+    "stddev_drift_ms": 304.45779475670565,
     "nodes_active": 12,
-    "n_samples": 228
+    "n_samples": 216
   },
   {
     "bucket_ms": 1781031600000,
@@ -3025,11 +3016,20 @@
   },
   {
     "bucket_ms": 1782234000000,
-    "avg_drift_ms": -632.2720369037829,
+    "avg_drift_ms": -634.5068359375,
     "min_drift_ms": -963.708984375,
     "max_drift_ms": -96.409912109375,
-    "stddev_drift_ms": 268.30780179885323,
+    "stddev_drift_ms": 261.6674443846548,
     "nodes_active": 12,
-    "n_samples": 228
+    "n_samples": 240
+  },
+  {
+    "bucket_ms": 1782237600000,
+    "avg_drift_ms": -167.5390625,
+    "min_drift_ms": -167.5390625,
+    "max_drift_ms": -167.5390625,
+    "stddev_drift_ms": 0.0,
+    "nodes_active": 12,
+    "n_samples": 12
   }
 ]
