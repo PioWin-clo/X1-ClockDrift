@@ -2,16 +2,31 @@
   {
     "rank": 1,
     "vote_account": "BNKdWKeYLHFzoXPtZZu13yU25ico25veKbGBTyo8EqpB",
-    "n_samples": 180,
-    "mean_drift_ms": -519.2398139105903,
-    "median_drift_ms": -511.6129150390625,
-    "stddev_drift_ms": 316.25292349285223,
-    "p10_drift_ms": -961.5068603515625,
-    "p90_drift_ms": -116.36247558593752,
+    "n_samples": 178,
+    "mean_drift_ms": -522.9293391195575,
+    "median_drift_ms": -524.763916015625,
+    "stddev_drift_ms": 316.0373666100431,
+    "p10_drift_ms": -961.5386474609375,
+    "p90_drift_ms": -115.63527832031245,
     "stake_lamports": 889771762629295,
     "stake_xnt": 889771.762629295,
     "is_foundation": false,
     "foundation_label": null,
+    "severity": "healthy"
+  },
+  {
+    "rank": 2,
+    "vote_account": "31MDFmh6QDYFRbytMLnJdUoGtznLMfojtrQzzav4to5r",
+    "n_samples": 179,
+    "mean_drift_ms": -500.42894553072625,
+    "median_drift_ms": -485.367919921875,
+    "stddev_drift_ms": 314.1115662274514,
+    "p10_drift_ms": -936.367333984375,
+    "p90_drift_ms": -95.79838867187483,
+    "stake_lamports": 56079484105877151,
+    "stake_xnt": 56079484.10587715,
+    "is_foundation": true,
+    "foundation_label": "X1 Labs (node5)",
     "severity": "healthy"
   }
 ]
